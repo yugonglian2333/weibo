@@ -1,0 +1,39 @@
+name: 微博每日签到发帖
+
+on:
+  schedule:
+    # 每天 UTC 0:00 执行（= 北京时间 8:00）
+    # 如需修改时间，调整 cron 表达式
+    # 格式: 分 时 日 月 周 (UTC 时间)
+    - cron: '0 0 * * *'
+
+  # 支持手动触发（在 GitHub Actions 页面点按钮）
+  workflow_dispatch:
+
+jobs:
+  weibo-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: |
+          pip install -r requirements.txt
+          # 如果使用 Claude API，取消下面这行注释
+          # pip install anthropic
+
+      - name: 执行微博签到发帖
+        env:
+          WEIBO_COOKIE: ${{ secrets.WEIBO_COOKIE }}
+          AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_API_BASE: ${{ secrets.AI_API_BASE }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+        run: python main.py
