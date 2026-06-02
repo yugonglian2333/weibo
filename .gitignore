@@ -17,6 +17,7 @@ venv/
 # 敏感配置（防止误提交）
 .env
 *.local.yaml
+cookie.md
 
 # 日志
 logs/

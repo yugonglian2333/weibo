@@ -8,7 +8,10 @@
 checkin:
   topics:
     # 方式一：只填名称，脚本自动搜索 containerid
-    - name: "你的超话名称"
+    - name: "鞠婧祎超话"
+      containerid: "1008086f1b7983ba4fca7456e28317e78127ed"
+    - name: "张婧仪超话"
+      containerid: "1008084ae7f528d66ae91d46332e067acdfba9"
     # 方式二：直接填 containerid（更可靠，推荐）
     # - name: "超话示例"
     #   containerid: "1008081234567890abcdef"
@@ -20,7 +23,7 @@ posting:
 
   # 发帖涉及的话题（AI 会围绕这些话题生成内容）
   topics:
-    - "你的超话名称"
-
+    - "鞠婧祎超话"
+    - "张婧仪超话"
   # 发帖风格：自然随性 / 专业严谨 / 幽默风趣 / 文艺清新
   style: "自然随性"
