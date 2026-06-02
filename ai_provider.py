@@ -25,6 +25,10 @@ class AIProvider(ABC):
         self,
         topics: list[str],
         style: str = "自然随性",
+        min_words: int = 50,
+        max_words: int = 200,
+        temperature: float = 0.9,
+        max_tokens: int = 4096,
     ) -> str:
         """
         生成一条微博帖子内容
@@ -32,6 +36,10 @@ class AIProvider(ABC):
         Args:
             topics: 话题列表，AI 会围绕这些话题生成内容
             style: 风格描述，如"自然随性"、"专业严谨"、"幽默风趣"
+            min_words: 最少字数
+            max_words: 最多字数
+            temperature: 生成随机性 (0-2)
+            max_tokens: 最大 token 数
 
         Returns:
             生成的微博正文（纯文本）
@@ -69,6 +77,10 @@ class MimoProvider(AIProvider):
         self,
         topics: list[str],
         style: str = "自然随性",
+        min_words: int = 50,
+        max_words: int = 200,
+        temperature: float = 0.9,
+        max_tokens: int = 4096,
     ) -> str:
         """调用 Mimo API 生成微博帖子（自动识别 OpenAI / Anthropic 协议）"""
         topic_str = "、".join(topics)
@@ -77,7 +89,7 @@ class MimoProvider(AIProvider):
             f"你的发言风格：{style}。\n"
             f"请围绕以下超话话题生成一条原创微博：{topic_str}。\n"
             f"要求：\n"
-            f"1. 字数在 50-200 字之间\n"
+            f"1. 字数在 {min_words}-{max_words} 字之间\n"
             f"2. 内容风格正面积极，重点表达对该话题/人物的喜爱、赞美、鼓励或分享有趣见闻\n"
             f"3. 用 personal 的语气（如「今天刷到」「真的好喜欢」），增加真实感和亲切感\n"
             f"4. 适当使用 emoji（1-3 个即可）\n"
@@ -118,8 +130,8 @@ class MimoProvider(AIProvider):
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": "请生成一条微博帖子"},
                     ],
-                    "temperature": 0.9,
-                    "max_tokens": 4096,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
                 },
                 "is_anthropic": False,
             })
@@ -128,8 +140,8 @@ class MimoProvider(AIProvider):
                 "url": f"{self.api_base}/messages",
                 "payload": {
                     "model": self.model,
-                    "max_tokens": 4096,
-                    "temperature": 0.9,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
                     "system": system_prompt,
                     "messages": [
                         {"role": "user", "content": "请生成一条微博帖子"},
@@ -147,8 +159,8 @@ class MimoProvider(AIProvider):
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": "请生成一条微博帖子"},
                     ],
-                    "temperature": 0.9,
-                    "max_tokens": 4096,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
                 },
                 "is_anthropic": False,
             })
@@ -261,6 +273,10 @@ class ClaudeProvider(AIProvider):
         self,
         topics: list[str],
         style: str = "自然随性",
+        min_words: int = 50,
+        max_words: int = 200,
+        temperature: float = 0.9,
+        max_tokens: int = 4096,
     ) -> str:
         """调用 Claude API 生成微博帖子"""
         topic_str = "、".join(topics)
@@ -271,14 +287,14 @@ class ClaudeProvider(AIProvider):
             client = Anthropic(api_key=self.api_key)
             message = client.messages.create(
                 model=self.model,
-                max_tokens=500,
-                temperature=0.9,
+                max_tokens=max_tokens,
+                temperature=temperature,
                 system=(
                     f"你是一个普通微博用户，喜欢分享日常生活、追星感受和正能量内容。"
                     f"你的发言风格：{style}。\n"
                     f"请围绕以下超话话题生成一条原创微博：{topic_str}。\n"
                     f"要求：\n"
-                    f"1. 字数在 50-200 字之间\n"
+                    f"1. 字数在 {min_words}-{max_words} 字之间\n"
                     f"2. 内容风格正面积极，重点表达对该话题/人物的喜爱、赞美、鼓励或分享有趣见闻\n"
                     f"3. 用 personal 的语气（如「今天刷到」「真的好喜欢」），增加真实感和亲切感\n"
                     f"4. 适当使用 emoji（1-3 个即可）\n"
@@ -348,6 +364,10 @@ class OpenAIProvider(AIProvider):
         self,
         topics: list[str],
         style: str = "自然随性",
+        min_words: int = 50,
+        max_words: int = 200,
+        temperature: float = 0.9,
+        max_tokens: int = 4096,
     ) -> str:
         """调用 OpenAI API 生成微博帖子"""
         topic_str = "、".join(topics)
@@ -369,7 +389,7 @@ class OpenAIProvider(AIProvider):
                                 f"你的发言风格：{style}。\n"
                                 f"请围绕以下超话话题生成一条原创微博：{topic_str}。\n"
                                 f"要求：\n"
-                                f"1. 字数在 50-200 字之间\n"
+                                f"1. 字数在 {min_words}-{max_words} 字之间\n"
                                 f"2. 内容风格正面积极，重点表达对该话题/人物的喜爱、赞美、鼓励或分享有趣见闻\n"
                                 f"3. 用 personal 的语气（如「今天刷到」「真的好喜欢」），增加真实感和亲切感\n"
                                 f"4. 适当使用 emoji（1-3 个即可）\n"
@@ -395,8 +415,8 @@ class OpenAIProvider(AIProvider):
                             "content": f"围绕超话话题生成微博：{topic_str}",
                         },
                     ],
-                    "temperature": 0.9,
-                    "max_tokens": 4096,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
                 },
                 timeout=60,
             )

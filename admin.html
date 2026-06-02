@@ -1,0 +1,2038 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>微博助手后台系统 — 配置管理</title>
+<style>
+/* ============================================================
+   CSS 变量 & 全局样式
+   ============================================================ */
+:root {
+  --bg: #f5f5f5;
+  --card-bg: #ffffff;
+  --text: #1a1a1a;
+  --text-secondary: #666;
+  --border: #e0e0e0;
+  --primary: #e8541e;
+  --primary-hover: #c74616;
+  --primary-light: #fff0eb;
+  --success: #10b981;
+  --danger: #ef4444;
+  --radius: 10px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,0.1);
+  --transition: 0.2s ease;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* ============================================================
+   顶部导航
+   ============================================================ */
+.header {
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  height: 60px;
+  box-shadow: var(--shadow);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-logo {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--primary);
+  margin-right: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-logo svg { width: 28px; height: 28px; }
+
+.header-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+}
+
+/* ============================================================
+   按钮体系
+   ============================================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+  text-decoration: none;
+  font-family: inherit;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+}
+.btn-primary:hover { background: var(--primary-hover); }
+
+.btn-secondary {
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover { background: #f9fafb; border-color: #ccc; }
+
+.btn-success {
+  background: var(--success);
+  color: #fff;
+}
+.btn-success:hover { background: #059669; }
+
+.btn-danger {
+  background: #fff;
+  color: var(--danger);
+  border: 1px solid #fecaca;
+}
+.btn-danger:hover { background: #fef2f2; }
+
+.btn-sm { padding: 5px 12px; font-size: 13px; }
+.btn-xs { padding: 3px 8px; font-size: 12px; border-radius: 6px; }
+
+/* ============================================================
+   主布局
+   ============================================================ */
+.main-container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 20px 80px;
+}
+
+/* Tab 导航 */
+.tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  padding: 4px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow);
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: all var(--transition);
+  font-family: inherit;
+}
+
+.tab-btn.active {
+  background: var(--primary-light);
+  color: var(--primary);
+  font-weight: 600;
+}
+.tab-btn:hover:not(.active) { color: var(--text); background: #f9fafb; }
+
+.tab-btn .tab-icon { margin-right: 4px; }
+
+/* 卡片 */
+.card {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  margin-bottom: 20px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.card-title {
+  font-size: 17px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* ============================================================
+   表单控件
+   ============================================================ */
+.form-group {
+  margin-bottom: 18px;
+}
+
+.form-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+
+.form-label .required {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.form-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.form-row-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+}
+
+input[type="text"],
+input[type="url"],
+input[type="number"],
+select,
+textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text);
+  background: #fff;
+  transition: border-color var(--transition);
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(232,84,30,0.1);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 80px;
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace;
+  font-size: 13px;
+}
+
+select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' fill='%23666' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+}
+
+/* Toggle 开关 */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #fafafa;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.toggle-label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.toggle {
+  position: relative;
+  width: 48px;
+  height: 26px;
+  flex-shrink: 0;
+}
+
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: #d1d5db;
+  border-radius: 26px;
+  transition: var(--transition);
+}
+
+.toggle-slider:before {
+  content: "";
+  position: absolute;
+  height: 20px;
+  width: 20px;
+  left: 3px;
+  bottom: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: var(--transition);
+}
+
+.toggle input:checked + .toggle-slider {
+  background: var(--primary);
+}
+
+.toggle input:checked + .toggle-slider:before {
+  transform: translateX(22px);
+}
+
+/* ============================================================
+   动态列表（超话管理）
+   ============================================================ */
+.list-item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  transition: all var(--transition);
+}
+
+.list-item:hover {
+  border-color: #ccc;
+  background: #fff;
+}
+
+.list-item .item-index {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  min-width: 24px;
+  text-align: center;
+}
+
+.list-item input {
+  flex: 1;
+}
+
+.list-item .item-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.list-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  width: 100%;
+  justify-content: center;
+  transition: all var(--transition);
+  font-family: inherit;
+}
+
+.list-add-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+/* ============================================================
+   导出面板
+   ============================================================ */
+.export-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: -1px;
+}
+
+.export-tab {
+  padding: 8px 20px;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  background: #f5f5f5;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px 8px 0 0;
+  transition: all var(--transition);
+  font-family: inherit;
+}
+
+.export-tab:not(:first-child) { margin-left: -1px; }
+
+.export-tab.active {
+  background: #fff;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.export-content {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  padding: 20px;
+  border-radius: 0 var(--radius) var(--radius) var(--radius);
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-x: auto;
+  white-space: pre;
+  border: 1px solid var(--border);
+  border-top: 2px solid #fff;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.export-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+/* ============================================================
+   导入面板
+   ============================================================ */
+.import-area {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 32px;
+  text-align: center;
+  transition: all var(--transition);
+  cursor: pointer;
+}
+
+.import-area:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.import-area input[type="file"] { display: none; }
+
+.import-area .import-icon { font-size: 36px; margin-bottom: 8px; }
+
+.import-area .import-text {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.import-area .import-hint {
+  font-size: 12px;
+  color: #999;
+  margin-top: 4px;
+}
+
+/* ============================================================
+   Toast 通知
+   ============================================================ */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1a1a1a;
+  color: #fff;
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-6px);
+}
+
+.toast.success { background: var(--success); }
+.toast.error { background: var(--danger); }
+
+/* ============================================================
+   状态徽章
+   ============================================================ */
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.badge-success { background: #d1fae5; color: #065f46; }
+.badge-warning { background: #fef3c7; color: #92400e; }
+.badge-info { background: #dbeafe; color: #1e40af; }
+
+/* 服务器连接状态 */
+.server-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-right: 12px;
+  transition: all var(--transition);
+}
+.server-status .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.server-status.online { background: #d1fae5; color: #065f46; }
+.server-status.online .dot { background: #10b981; }
+.server-status.offline { background: #fee2e2; color: #991b1b; }
+.server-status.offline .dot { background: #ef4444; }
+.server-status.checking { background: #fef3c7; color: #92400e; }
+.server-status.checking .dot { background: #f59e0b; animation: pulse 1s infinite; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ============================================================
+   响应式
+   ============================================================ */
+@media (max-width: 768px) {
+  .form-row, .form-row-3 {
+    grid-template-columns: 1fr;
+  }
+  .header {
+    padding: 0 12px;
+  }
+  .main-container {
+    padding: 16px 12px 80px;
+  }
+  .card {
+    padding: 16px;
+  }
+  .list-item {
+    flex-wrap: wrap;
+  }
+  .list-item input {
+    min-width: 100%;
+    order: 2;
+    margin-top: 8px;
+  }
+  .list-item .item-actions {
+    order: 1;
+  }
+}
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     Header
+     ============================================================ -->
+<header class="header">
+  <div class="header-logo">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.19 2H3.81A1.81 1.81 0 0 0 2 3.81v12.79a1.81 1.81 0 0 0 1.81 1.81h5.78l-2.15 3.39a.45.45 0 0 0 .38.7h8.36a.45.45 0 0 0 .38-.7l-2.15-3.39h5.78A1.81 1.81 0 0 0 22 16.6V3.81A1.81 1.81 0 0 0 20.19 2zm-1.75 10.8h-3.76l-.73 2.55h-1.9L14.99 4h2.02l2.95 11.35h-1.9l-.62-2.55zm-3.06-1.5h2.35l-1.13-4.7h-.1l-1.12 4.7zM7.69 15.35l.73-2.55h.1l.73 2.55h-1.56zm1.61-3.62H6.36l-.62-2.55h1.9l.67 2.55zm-3.08 1.5H3.86l-.62-2.55h1.9l.68 2.55zm0 1.5l-.73 2.55h-1.9l2.62-2.55h.01z"/></svg>
+    微博助手 · 后台系统
+  </div>
+
+  <span id="server-status" class="server-status offline">
+    <span class="dot"></span>
+    <span class="status-text">离线模式</span>
+  </span>
+
+  <div class="header-actions">
+    <button class="btn btn-secondary btn-sm" onclick="importConfig()" title="从现有 config.yaml / .env 导入">
+      📥 导入配置
+    </button>
+    <button class="btn btn-secondary btn-sm" onclick="resetAll()" title="恢复默认设置">
+      🔄 恢复默认
+    </button>
+    <button class="btn btn-primary btn-sm" onclick="scrollToExport()">
+      📋 生成配置
+    </button>
+  </div>
+</header>
+
+<div class="main-container">
+
+  <!-- ============================================================
+       Tab 导航
+       ============================================================ -->
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('checkin')">
+      <span class="tab-icon">✅</span> 超话签到
+    </button>
+    <button class="tab-btn" onclick="switchTab('posting')">
+      <span class="tab-icon">🤖</span> AI 发帖
+    </button>
+    <button class="tab-btn" onclick="switchTab('ai')">
+      <span class="tab-icon">⚙️</span> AI 服务商
+    </button>
+    <button class="tab-btn" onclick="switchTab('notify')">
+      <span class="tab-icon">📬</span> 通知推送
+    </button>
+    <button class="tab-btn" onclick="switchTab('advanced')">
+      <span class="tab-icon">🔧</span> 高级
+    </button>
+    <button class="tab-btn" onclick="switchTab('export')">
+      <span class="tab-icon">📋</span> 导出
+    </button>
+  </div>
+
+  <!-- ============================================================
+       Tab 1: 超话签到
+       ============================================================ -->
+  <div id="tab-checkin" class="tab-content">
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">✅ 超话签到列表</div>
+          <div class="card-desc">配置需要每日签到的超话。支持自动搜索 containerid，也可手动指定。</div>
+        </div>
+        <span id="checkin-count" class="badge badge-info">0 个超话</span>
+      </div>
+
+      <div id="checkin-list"></div>
+
+      <button class="list-add-btn" onclick="addCheckinTopic()">
+        ＋ 添加超话
+      </button>
+
+      <div class="form-hint" style="margin-top:12px;">
+        💡 <strong>提示：</strong>containerid 留空则自动搜索。推荐手动填入（格式：100808...），更可靠。
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============================================================
+       Tab 2: AI 发帖
+       ============================================================ -->
+  <div id="tab-posting" class="tab-content" style="display:none;">
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">🤖 发帖开关</div>
+          <div class="card-desc">启用后，AI 会围绕指定话题生成内容并自动发布到微博。</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="posting-enabled" checked onchange="saveAll()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">💬 发帖话题</div>
+          <div class="card-desc">每个话题将独立生成一条微博。建议与签到超话保持一致。</div>
+        </div>
+        <span id="post-topic-count" class="badge badge-info">0 个话题</span>
+      </div>
+
+      <div id="post-topic-list"></div>
+
+      <button class="list-add-btn" onclick="addPostTopic()">
+        ＋ 添加话题
+      </button>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🎨 发帖风格</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="post-style">内容风格</label>
+        <select id="post-style" onchange="saveAll()">
+          <option value="自然随性">自然随性 — 像普通网友的日常分享</option>
+          <option value="专业严谨">专业严谨 — 正式、专业的表达方式</option>
+          <option value="幽默风趣">幽默风趣 — 轻松活泼、带点俏皮</option>
+          <option value="文艺清新">文艺清新 — 文艺范、温暖治愈</option>
+        </select>
+        <div class="form-hint">AI 生成内容时将遵循此风格。建议选择「自然随性」以模拟真实用户。</div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="post-min-words">最少字数</label>
+          <input type="number" id="post-min-words" value="50" min="10" max="500" onchange="saveAll()">
+          <div class="form-hint">AI 生成内容的最少字数</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="post-max-words">最多字数</label>
+          <input type="number" id="post-max-words" value="200" min="20" max="2000" onchange="saveAll()">
+          <div class="form-hint">AI 生成内容的最多字数（微博上限 2000 字）</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============================================================
+       Tab 3: AI 服务商
+       ============================================================ -->
+  <div id="tab-ai" class="tab-content" style="display:none;">
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">⚙️ AI 服务商配置</div>
+          <div class="card-desc">选择 AI 服务商并配置连接参数。支持 Mimo / Claude / OpenAI 兼容接口。</div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="ai-provider">
+          服务商 <span class="required">*必填</span>
+        </label>
+        <select id="ai-provider" onchange="onAIProviderChange(); saveAll();">
+          <option value="mimo">mimo — 小米 Mimo AI（默认）</option>
+          <option value="claude">claude — Anthropic Claude</option>
+          <option value="openai">openai — OpenAI / 兼容接口</option>
+        </select>
+        <div class="form-hint">切换服务商后，下方默认参数会自动调整</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="ai-api-key">
+          API Key <span class="required">*必填</span>
+        </label>
+        <input type="text" id="ai-api-key" placeholder="你的 API Key..." onchange="saveAll()">
+        <div class="form-hint">
+          ⚠️ 此为敏感信息，存储在 .env / GitHub Secrets 中
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="ai-api-base">API Base URL</label>
+        <input type="url" id="ai-api-base" placeholder="https://api.xiaomimimo.com/v1" onchange="saveAll()">
+        <div class="form-hint" id="ai-api-base-hint">Mimo 默认: https://api.xiaomimimo.com/v1</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="ai-model">模型名称</label>
+        <input type="text" id="ai-model" placeholder="mimo-chat" onchange="saveAll()">
+        <div class="form-hint" id="ai-model-hint">Mimo 默认: mimo-chat</div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="ai-temperature">Temperature</label>
+          <input type="number" id="ai-temperature" value="0.9" min="0" max="2" step="0.1" onchange="saveAll()">
+          <div class="form-hint">控制随机性（0=确定, 1=最大随机）。推荐 0.7-0.9</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="ai-max-tokens">Max Tokens</label>
+          <input type="number" id="ai-max-tokens" value="4096" min="100" max="32000" step="100" onchange="saveAll()">
+          <div class="form-hint">单次生成的最大 token 数</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============================================================
+       Tab 4: 通知推送
+       ============================================================ -->
+  <div id="tab-notify" class="tab-content" style="display:none;">
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">📬 通知开关</div>
+          <div class="card-desc">启用后，每日执行结果将通过微信/Telegram 推送给你。</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="notify-enabled" checked onchange="saveAll()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">📡 通知渠道</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="notify-provider">渠道</label>
+        <select id="notify-provider" onchange="onNotifyProviderChange(); saveAll();">
+          <option value="pushplus">PushPlus — 微信公众号推送（推荐）</option>
+          <option value="serverchan">Server酱 — 微信公众号推送</option>
+          <option value="telegram">Telegram Bot — Telegram 推送</option>
+        </select>
+        <div class="form-hint" id="notify-provider-hint">
+          推荐 PushPlus：访问 <a href="https://www.pushplus.plus/" target="_blank">pushplus.plus</a> 微信扫码获取 Token
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="notify-token">
+          Token / SendKey <span class="required">*必填</span>
+        </label>
+        <input type="text" id="notify-token" placeholder="通知渠道的 Token..." onchange="saveAll()">
+        <div class="form-hint">
+          PushPlus: 在「发送消息」→「一对一发送」页面获取 Token<br>
+          Server酱: 在 SendKey 页面获取 SendKey
+        </div>
+      </div>
+
+      <div class="form-group" id="notify-chatid-group" style="display:none;">
+        <label class="form-label" for="notify-chat-id">
+          Chat ID <span class="required">*Telegram 必填</span>
+        </label>
+        <input type="text" id="notify-chat-id" placeholder="你的 Telegram Chat ID..." onchange="saveAll()">
+        <div class="form-hint">
+          获取方法：向你的 Bot 发一条消息，然后访问
+          https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates 查看 chat_id
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============================================================
+       Tab 5: 高级设置
+       ============================================================ -->
+  <div id="tab-advanced" class="tab-content" style="display:none;">
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">🔐 微博 Cookie</div>
+          <div class="card-desc">微博登录凭证，存储在 .env / GitHub Secrets 中（敏感信息）。</div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="weibo-cookie">
+          Cookie <span class="required">*必填</span>
+        </label>
+        <textarea id="weibo-cookie" placeholder="从浏览器复制完整的 Cookie 字符串粘贴到这里..." onchange="saveAll()"></textarea>
+        <div class="form-hint">
+          获取方式：浏览器登录 m.weibo.cn → F12 → Application → Cookies → 全选复制
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">⏱️ 请求间隔</div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="interval-checkin">签到间隔（秒）</label>
+          <input type="number" id="interval-checkin" value="2" min="1" max="30" onchange="saveAll()">
+          <div class="form-hint">每个超话签到之间的等待时间，避免被限流</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="interval-post">发帖间隔（秒）</label>
+          <input type="number" id="interval-post" value="3" min="1" max="30" onchange="saveAll()">
+          <div class="form-hint">每条帖子发布之间的等待时间</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">⏰ 定时执行（Cron）</div>
+      </div>
+
+      <div class="form-row-3">
+        <div class="form-group">
+          <label class="form-label" for="cron-minute">分钟</label>
+          <input type="text" id="cron-minute" value="0" onchange="updateCronPreview(); saveAll();">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="cron-hour">小时（UTC）</label>
+          <input type="text" id="cron-hour" value="0" onchange="updateCronPreview(); saveAll();">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="cron-preset">快捷设置</label>
+          <select id="cron-preset" onchange="applyCronPreset()">
+            <option value="">自定义...</option>
+            <option value="22 0">北京时间 06:00 (UTC 22:00)</option>
+            <option value="0 0">北京时间 08:00 (UTC 00:00)</option>
+            <option value="2 0">北京时间 10:00 (UTC 02:00)</option>
+            <option value="14 0">北京时间 22:00 (UTC 14:00)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Cron 表达式预览</label>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <code id="cron-preview" style="background:#f5f5f5;padding:8px 14px;border-radius:6px;font-size:16px;font-family:monospace;flex:1;">
+            0 0 * * *
+          </code>
+          <span id="cron-beijing-hint" style="font-size:13px;color:var(--text-secondary);white-space:nowrap;">
+            ≈ 北京时间 08:00
+          </span>
+        </div>
+        <div class="form-hint">
+          GitHub Actions 使用 UTC 时间。北京时间 = UTC + 8 小时。
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============================================================
+       Tab 6: 导出配置
+       ============================================================ -->
+  <div id="tab-export" class="tab-content" style="display:none;">
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">📋 生成配置文件</div>
+          <div class="card-desc">复制或下载生成的配置文件，替换项目中对应的文件。</div>
+        </div>
+      </div>
+
+      <div class="export-tabs">
+        <button class="export-tab active" onclick="switchExport('config-yaml')">config.yaml</button>
+        <button class="export-tab" onclick="switchExport('env')">.env</button>
+        <button class="export-tab" onclick="switchExport('secrets')">GitHub Secrets</button>
+      </div>
+
+      <div id="export-config-yaml" class="export-content"></div>
+      <div id="export-env" class="export-content" style="display:none;"></div>
+      <div id="export-secrets" class="export-content" style="display:none;"></div>
+
+      <div class="export-actions">
+        <button class="btn btn-primary" onclick="copyCurrentExport()">📋 复制到剪贴板</button>
+        <button class="btn btn-success" onclick="downloadCurrentExport()">💾 下载文件</button>
+      </div>
+
+      <div class="form-hint" style="margin-top:12px;">
+        💡 <strong>使用方式：</strong>
+        将 <code>config.yaml</code> 放在项目根目录覆盖原文件；
+        将 <code>.env</code> 内容用于本地运行（或手动同步到 GitHub Secrets）。
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- ============================================================
+     Toast 通知
+     ============================================================ -->
+<div id="toast" class="toast"></div>
+
+<!-- 隐藏的文件导入 input -->
+<input type="file" id="import-file-input" accept=".yaml,.yml,.env,.txt" style="display:none;" onchange="handleFileImport(event)">
+
+<script>
+/* ============================================================
+   数据模型 & 默认值
+   ============================================================ */
+const DEFAULTS = {
+  // 签到
+  checkinTopics: [
+    { name: "鞠婧祎超话", containerid: "1008086f1b7983ba4fca7456e28317e78127ed" },
+    { name: "张婧仪超话", containerid: "1008084ae7f528d66ae91d46332e067acdfba9" }
+  ],
+
+  // 发帖
+  postingEnabled: true,
+  postTopics: ["鞠婧祎超话", "张婧仪超话"],
+  postStyle: "自然随性",
+  postMinWords: 50,
+  postMaxWords: 200,
+
+  // AI 服务商
+  aiProvider: "mimo",
+  aiApiKey: "",
+  aiApiBase: "https://api.xiaomimimo.com/v1",
+  aiModel: "mimo-chat",
+  aiTemperature: 0.9,
+  aiMaxTokens: 4096,
+
+  // 通知
+  notifyEnabled: true,
+  notifyProvider: "pushplus",
+  notifyToken: "",
+  notifyChatId: "",
+
+  // 高级
+  weiboCookie: "",
+  intervalCheckin: 2,
+  intervalPost: 3,
+  cronMinute: "0",
+  cronHour: "0",
+};
+
+// 当前数据
+let config = loadFromStorage();
+
+/* ============================================================
+   localStorage 持久化
+   ============================================================ */
+function loadFromStorage() {
+  try {
+    const saved = localStorage.getItem('weibo-config');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      // 合并默认值，确保新增字段有默认值
+      return deepMerge(DEFAULTS, parsed);
+    }
+  } catch (e) { /* ignore */ }
+  return JSON.parse(JSON.stringify(DEFAULTS));
+}
+
+function deepMerge(defaults, saved) {
+  const result = JSON.parse(JSON.stringify(defaults));
+  for (const key of Object.keys(saved)) {
+    if (saved[key] !== undefined) {
+      result[key] = saved[key];
+    }
+  }
+  return result;
+}
+
+function saveAll() {
+  collectFormData();
+  try {
+    localStorage.setItem('weibo-config', JSON.stringify(config));
+  } catch (e) { /* ignore */ }
+  updateAllPreviews();
+  // 自动同步到本地文件
+  if (serverAvailable) debouncedSaveToServer();
+}
+
+function collectFormData() {
+  // 签到
+  config.checkinTopics = collectCheckinTopics();
+
+  // 发帖
+  config.postingEnabled = document.getElementById('posting-enabled').checked;
+  config.postTopics = collectPostTopics();
+  config.postStyle = document.getElementById('post-style').value;
+  config.postMinWords = parseInt(document.getElementById('post-min-words').value) || 50;
+  config.postMaxWords = parseInt(document.getElementById('post-max-words').value) || 200;
+
+  // AI
+  config.aiProvider = document.getElementById('ai-provider').value;
+  config.aiApiKey = document.getElementById('ai-api-key').value.trim();
+  config.aiApiBase = document.getElementById('ai-api-base').value.trim();
+  config.aiModel = document.getElementById('ai-model').value.trim();
+  config.aiTemperature = parseFloat(document.getElementById('ai-temperature').value) || 0.9;
+  config.aiMaxTokens = parseInt(document.getElementById('ai-max-tokens').value) || 4096;
+
+  // 通知
+  config.notifyEnabled = document.getElementById('notify-enabled').checked;
+  config.notifyProvider = document.getElementById('notify-provider').value;
+  config.notifyToken = document.getElementById('notify-token').value.trim();
+  config.notifyChatId = document.getElementById('notify-chat-id').value.trim();
+
+  // 高级
+  config.weiboCookie = document.getElementById('weibo-cookie').value.trim();
+  config.intervalCheckin = parseInt(document.getElementById('interval-checkin').value) || 2;
+  config.intervalPost = parseInt(document.getElementById('interval-post').value) || 3;
+  config.cronMinute = document.getElementById('cron-minute').value.trim() || '0';
+  config.cronHour = document.getElementById('cron-hour').value.trim() || '0';
+}
+
+/* ============================================================
+   初始化表单
+   ============================================================ */
+function initForm() {
+  // 签到
+  renderCheckinTopics();
+
+  // 发帖
+  document.getElementById('posting-enabled').checked = config.postingEnabled;
+  renderPostTopics();
+  document.getElementById('post-style').value = config.postStyle;
+  document.getElementById('post-min-words').value = config.postMinWords;
+  document.getElementById('post-max-words').value = config.postMaxWords;
+
+  // AI
+  document.getElementById('ai-provider').value = config.aiProvider;
+  document.getElementById('ai-api-key').value = config.aiApiKey;
+  document.getElementById('ai-api-base').value = config.aiApiBase;
+  document.getElementById('ai-model').value = config.aiModel;
+  document.getElementById('ai-temperature').value = config.aiTemperature;
+  document.getElementById('ai-max-tokens').value = config.aiMaxTokens;
+
+  // 通知
+  document.getElementById('notify-enabled').checked = config.notifyEnabled;
+  document.getElementById('notify-provider').value = config.notifyProvider;
+  document.getElementById('notify-token').value = config.notifyToken;
+  document.getElementById('notify-chat-id').value = config.notifyChatId;
+
+  // 高级
+  document.getElementById('weibo-cookie').value = config.weiboCookie;
+  document.getElementById('interval-checkin').value = config.intervalCheckin;
+  document.getElementById('interval-post').value = config.intervalPost;
+  document.getElementById('cron-minute').value = config.cronMinute;
+  document.getElementById('cron-hour').value = config.cronHour;
+
+  // 初始化条件显示
+  onAIProviderChange();
+  onNotifyProviderChange();
+  updateCronPreview();
+  updateAllPreviews();
+}
+
+/* ============================================================
+   动态列表：签到超话
+   ============================================================ */
+function collectCheckinTopics() {
+  const items = document.querySelectorAll('#checkin-list .list-item');
+  const topics = [];
+  items.forEach(item => {
+    const name = item.querySelector('.topic-name').value.trim();
+    const cid = item.querySelector('.topic-cid').value.trim();
+    if (name) {
+      const entry = { name };
+      if (cid) entry.containerid = cid;
+      topics.push(entry);
+    }
+  });
+  return topics;
+}
+
+function renderCheckinTopics() {
+  const container = document.getElementById('checkin-list');
+  const topics = config.checkinTopics || [];
+  container.innerHTML = topics.map((t, i) => `
+    <div class="list-item" draggable="true">
+      <span class="item-index">${i + 1}</span>
+      <input type="text" class="topic-name" placeholder="超话名称（如：鞠婧祎超话）" value="${escapeHtml(t.name || '')}" onchange="saveAll()">
+      <input type="text" class="topic-cid" placeholder="containerid（可选，自动搜索）" value="${escapeHtml(t.containerid || '')}" onchange="saveAll()" style="max-width:320px;">
+      <div class="item-actions">
+        <button class="btn btn-secondary btn-xs" onclick="moveCheckinTopic(${i}, -1)" ${i === 0 ? 'disabled' : ''} title="上移">↑</button>
+        <button class="btn btn-secondary btn-xs" onclick="moveCheckinTopic(${i}, 1)" ${i === topics.length - 1 ? 'disabled' : ''} title="下移">↓</button>
+        <button class="btn btn-danger btn-xs" onclick="removeCheckinTopic(${i})" title="删除">✕</button>
+      </div>
+    </div>
+  `).join('');
+  updateCheckinCount();
+}
+
+function addCheckinTopic() {
+  if (!config.checkinTopics) config.checkinTopics = [];
+  config.checkinTopics.push({ name: '', containerid: '' });
+  renderCheckinTopics();
+  saveAll();
+}
+
+function removeCheckinTopic(index) {
+  config.checkinTopics.splice(index, 1);
+  renderCheckinTopics();
+  saveAll();
+}
+
+function moveCheckinTopic(index, direction) {
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= config.checkinTopics.length) return;
+  const tmp = config.checkinTopics[index];
+  config.checkinTopics[index] = config.checkinTopics[newIndex];
+  config.checkinTopics[newIndex] = tmp;
+  renderCheckinTopics();
+  saveAll();
+}
+
+function updateCheckinCount() {
+  document.getElementById('checkin-count').textContent =
+    `${config.checkinTopics.length} 个超话`;
+}
+
+/* ============================================================
+   动态列表：发帖话题
+   ============================================================ */
+function collectPostTopics() {
+  const items = document.querySelectorAll('#post-topic-list .list-item');
+  const topics = [];
+  items.forEach(item => {
+    const name = item.querySelector('.post-topic-name').value.trim();
+    if (name) topics.push(name);
+  });
+  return topics;
+}
+
+function renderPostTopics() {
+  const container = document.getElementById('post-topic-list');
+  const topics = config.postTopics || [];
+  container.innerHTML = topics.map((t, i) => `
+    <div class="list-item">
+      <span class="item-index">${i + 1}</span>
+      <input type="text" class="post-topic-name" placeholder="话题名称（如：鞠婧祎超话）" value="${escapeHtml(t)}" onchange="saveAll()">
+      <div class="item-actions">
+        <button class="btn btn-secondary btn-xs" onclick="movePostTopic(${i}, -1)" ${i === 0 ? 'disabled' : ''}>↑</button>
+        <button class="btn btn-secondary btn-xs" onclick="movePostTopic(${i}, 1)" ${i === topics.length - 1 ? 'disabled' : ''}>↓</button>
+        <button class="btn btn-danger btn-xs" onclick="removePostTopic(${i})">✕</button>
+      </div>
+    </div>
+  `).join('');
+  updatePostTopicCount();
+}
+
+function addPostTopic() {
+  if (!config.postTopics) config.postTopics = [];
+  config.postTopics.push('');
+  renderPostTopics();
+  saveAll();
+}
+
+function removePostTopic(index) {
+  config.postTopics.splice(index, 1);
+  renderPostTopics();
+  saveAll();
+}
+
+function movePostTopic(index, direction) {
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= config.postTopics.length) return;
+  const tmp = config.postTopics[index];
+  config.postTopics[index] = config.postTopics[newIndex];
+  config.postTopics[newIndex] = tmp;
+  renderPostTopics();
+  saveAll();
+}
+
+function updatePostTopicCount() {
+  document.getElementById('post-topic-count').textContent =
+    `${config.postTopics.length} 个话题`;
+}
+
+/* ============================================================
+   Tab 切换
+   ============================================================ */
+function switchTab(tabName) {
+  // 保存当前表单数据
+  collectFormData();
+
+  // 更新 Tab 按钮
+  document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+  document.querySelector(`.tab-btn[onclick*="${tabName}"]`)?.classList.add('active');
+
+  // 切换内容
+  document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+  const target = document.getElementById(`tab-${tabName}`);
+  if (target) target.style.display = '';
+
+  // 如果切换到导出 tab，刷新预览
+  if (tabName === 'export') {
+    updateAllPreviews();
+    switchExport(currentExportType);
+  }
+}
+
+/* ============================================================
+   导出面板切换
+   ============================================================ */
+let currentExportType = 'config-yaml';
+
+function switchExport(type) {
+  currentExportType = type;
+  document.querySelectorAll('.export-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.export-tab[onclick*="${type}"]`)?.classList.add('active');
+
+  document.querySelectorAll('[id^="export-"]').forEach(el => {
+    if (el.id === `export-${type}`) {
+      el.style.display = '';
+      el.textContent = generateExportContent(type);
+    } else {
+      el.style.display = 'none';
+    }
+  });
+}
+
+function scrollToExport() {
+  switchTab('export');
+  document.getElementById('tab-export')?.scrollIntoView({ behavior: 'smooth' });
+}
+
+/* ============================================================
+   生成导出内容
+   ============================================================ */
+function generateExportContent(type) {
+  collectFormData();
+
+  if (type === 'config-yaml') {
+    return generateConfigYaml();
+  } else if (type === 'env') {
+    return generateEnv();
+  } else if (type === 'secrets') {
+    return generateSecrets();
+  }
+  return '';
+}
+
+function generateConfigYaml() {
+  let yaml = '# ============================================================\n';
+  yaml += '# 微博超话签到 + AI 发帖 配置文件\n';
+  yaml += '# 由微博助手后台系统生成\n';
+  yaml += '# ============================================================\n';
+  yaml += '# 注意：Cookie 和 API Key 等敏感信息不要写在这里！\n';
+  yaml += '# 通过环境变量传入（GitHub Secrets 或本地环境变量）\n';
+  yaml += '\n';
+
+  // 签到
+  yaml += '# ---- 超话签到列表 ----\n';
+  yaml += 'checkin:\n';
+  yaml += '  topics:\n';
+  const checkinTopics = config.checkinTopics || [];
+  if (checkinTopics.length === 0) {
+    yaml += '    # - name: "超话名称"\n';
+    yaml += '    #   containerid: "100808xxx"\n';
+  } else {
+    for (const t of checkinTopics) {
+      const hasCid = t.containerid && t.containerid.trim();
+      if (hasCid) {
+        yaml += `    - name: "${t.name}"\n`;
+        yaml += `      containerid: "${t.containerid}"\n`;
+      } else {
+        yaml += `    - name: "${t.name}"\n`;
+      }
+    }
+  }
+  yaml += '\n';
+
+  // 发帖
+  yaml += '# ---- AI 发帖设置 ----\n';
+  yaml += 'posting:\n';
+  yaml += `  enabled: ${config.postingEnabled ? 'true' : 'false'}\n`;
+  yaml += '  topics:\n';
+  const postTopics = config.postTopics || [];
+  if (postTopics.length === 0) {
+    yaml += '    # - "话题名称"\n';
+  } else {
+    for (const t of postTopics) {
+      yaml += `    - "${t}"\n`;
+    }
+  }
+  yaml += `  style: "${config.postStyle}"\n`;
+  yaml += `  min_words: ${config.postMinWords}\n`;
+  yaml += `  max_words: ${config.postMaxWords}\n`;
+  yaml += '\n';
+
+  // 通知
+  yaml += '# ---- 通知推送 ----\n';
+  yaml += 'notification:\n';
+  yaml += `  enabled: ${config.notifyEnabled ? 'true' : 'false'}\n`;
+  yaml += `  provider: ${config.notifyProvider}\n`;
+
+  return yaml;
+}
+
+function generateEnv() {
+  let env = '# ============================================================\n';
+  env += '# 微博超话签到 + AI 发帖 — 环境变量配置\n';
+  env += '# 由微博助手后台系统生成\n';
+  env += '# ============================================================\n';
+  env += '# 使用方法:\n';
+  env += '#   本地: 保存为 .env 放在项目根目录\n';
+  env += '#   线上: 将这些值添加到 GitHub Secrets\n';
+  env += '# ============================================================\n';
+  env += '\n';
+
+  env += '# ---- 微博 Cookie（必填）----\n';
+  env += `WEIBO_COOKIE=${config.weiboCookie || '你的微博Cookie粘贴在这里'}\n`;
+  env += '\n';
+
+  env += '# ---- AI 内容生成 ----\n';
+  env += `AI_PROVIDER=${config.aiProvider}\n`;
+  env += `AI_API_KEY=${config.aiApiKey || '你的AI_API_Key'}\n`;
+  if (config.aiApiBase) {
+    env += `AI_API_BASE=${config.aiApiBase}\n`;
+  } else {
+    env += '# AI_API_BASE=https://api.xiaomimimo.com/v1\n';
+  }
+  if (config.aiModel) {
+    env += `AI_MODEL=${config.aiModel}\n`;
+  } else {
+    env += '# AI_MODEL=mimo-chat\n';
+  }
+  env += '\n';
+
+  env += '# ---- 通知推送 ----\n';
+  env += `NOTIFY_PROVIDER=${config.notifyProvider}\n`;
+  env += `NOTIFY_TOKEN=${config.notifyToken || '你的通知渠道Token'}\n`;
+  if (config.notifyProvider === 'telegram' || config.notifyChatId) {
+    env += `NOTIFY_CHAT_ID=${config.notifyChatId || '你的Telegram_chat_id'}\n`;
+  } else {
+    env += '# NOTIFY_CHAT_ID=你的Telegram_chat_id\n';
+  }
+
+  return env;
+}
+
+function generateSecrets() {
+  let txt = '# ============================================================\n';
+  txt += '# GitHub Actions Secrets 配置\n';
+  txt += '# 复制以下内容到仓库 Settings → Secrets and variables → Actions\n';
+  txt += '# ============================================================\n';
+  txt += '\n';
+  txt += '# 逐条添加以下 Secrets:\n';
+  txt += '\n';
+  txt += `WEIBO_COOKIE = ${config.weiboCookie || '(请填写)'}\n`;
+  txt += '\n';
+  txt += `AI_PROVIDER = ${config.aiProvider}\n`;
+  txt += `AI_API_KEY = ${config.aiApiKey || '(请填写)'}\n`;
+  if (config.aiApiBase) {
+    txt += `AI_API_BASE = ${config.aiApiBase}\n`;
+  }
+  if (config.aiModel) {
+    txt += `AI_MODEL = ${config.aiModel}\n`;
+  }
+  txt += '\n';
+  txt += `NOTIFY_PROVIDER = ${config.notifyProvider}\n`;
+  txt += `NOTIFY_TOKEN = ${config.notifyToken || '(请填写)'}\n`;
+  if (config.notifyProvider === 'telegram' || config.notifyChatId) {
+    txt += `NOTIFY_CHAT_ID = ${config.notifyChatId || '(请填写)'}\n`;
+  }
+
+  return txt;
+}
+
+function updateAllPreviews() {
+  if (document.getElementById('tab-export').style.display !== 'none') {
+    const el = document.getElementById(`export-${currentExportType}`);
+    if (el && el.style.display !== 'none') {
+      el.textContent = generateExportContent(currentExportType);
+    }
+  }
+}
+
+/* ============================================================
+   复制 & 下载
+   ============================================================ */
+function copyCurrentExport() {
+  const content = generateExportContent(currentExportType);
+  navigator.clipboard.writeText(content).then(() => {
+    showToast('已复制到剪贴板 ✓', 'success');
+  }).catch(() => {
+    // Fallback
+    const ta = document.createElement('textarea');
+    ta.value = content;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('已复制到剪贴板 ✓', 'success');
+  });
+}
+
+function downloadCurrentExport() {
+  const content = generateExportContent(currentExportType);
+  const filename = currentExportType === 'config-yaml' ? 'config.yaml' :
+                   currentExportType === 'env' ? '.env' : 'github-secrets.txt';
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`已下载 ${filename} ✓`, 'success');
+}
+
+/* ============================================================
+   AI Provider 切换
+   ============================================================ */
+function onAIProviderChange() {
+  const provider = document.getElementById('ai-provider').value;
+  const apiBaseInput = document.getElementById('ai-api-base');
+  const modelInput = document.getElementById('ai-model');
+  const baseHint = document.getElementById('ai-api-base-hint');
+  const modelHint = document.getElementById('ai-model-hint');
+
+  const defaults = {
+    mimo: { base: 'https://api.xiaomimimo.com/v1', model: 'mimo-chat' },
+    claude: { base: '', model: 'claude-haiku-4-5-20251001' },
+    openai: { base: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  };
+
+  const d = defaults[provider] || defaults.mimo;
+
+  // 仅在值为空或从默认值切换时自动填充
+  if (!apiBaseInput.value || isDefaultBase(apiBaseInput.value)) {
+    apiBaseInput.value = d.base;
+    apiBaseInput.placeholder = d.base || 'Claude 使用默认 API 地址，可不填';
+  }
+  if (!modelInput.value || isDefaultModel(modelInput.value)) {
+    modelInput.value = d.model;
+    modelInput.placeholder = d.model;
+  }
+
+  baseHint.textContent = provider === 'claude'
+    ? 'Claude 使用 Anthropic 官方 API，无需填写（除非使用代理）'
+    : `${provider} 默认: ${d.base}`;
+
+  modelHint.textContent = `${provider} 默认模型: ${d.model}`;
+
+  // Claude 不需要设置 API Base
+  if (provider === 'claude') {
+    apiBaseInput.placeholder = '留空使用 Anthropic 官方 API';
+  }
+}
+
+function isDefaultBase(value) {
+  const defaults = ['https://api.xiaomimimo.com/v1', 'https://api.openai.com/v1', ''];
+  return defaults.includes(value);
+}
+
+function isDefaultModel(value) {
+  const defaults = ['mimo-chat', 'claude-haiku-4-5-20251001', 'gpt-4o-mini', ''];
+  return defaults.includes(value);
+}
+
+/* ============================================================
+   通知渠道切换
+   ============================================================ */
+function onNotifyProviderChange() {
+  const provider = document.getElementById('notify-provider').value;
+  const chatIdGroup = document.getElementById('notify-chatid-group');
+  const hint = document.getElementById('notify-provider-hint');
+
+  if (provider === 'telegram') {
+    chatIdGroup.style.display = '';
+  } else {
+    chatIdGroup.style.display = 'none';
+  }
+
+  const hints = {
+    pushplus: '推荐 PushPlus：访问 <a href="https://www.pushplus.plus/" target="_blank">pushplus.plus</a> 微信扫码获取 Token',
+    serverchan: 'Server酱：访问 <a href="https://sct.ftqq.com/" target="_blank">sct.ftqq.com</a> 微信扫码获取 SendKey',
+    telegram: 'Telegram：向 <a href="https://t.me/BotFather" target="_blank">@BotFather</a> 创建 Bot 获取 Token',
+  };
+  hint.innerHTML = hints[provider] || '';
+}
+
+/* ============================================================
+   Cron 预览
+   ============================================================ */
+function updateCronPreview() {
+  const minute = document.getElementById('cron-minute').value.trim() || '0';
+  const hour = document.getElementById('cron-hour').value.trim() || '0';
+  const cron = `${minute} ${hour} * * *`;
+  document.getElementById('cron-preview').textContent = cron;
+
+  // 计算北京时间
+  let beijingHour = parseInt(hour) + 8;
+  if (beijingHour >= 24) beijingHour -= 24;
+  const beijingTime = `${String(beijingHour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  document.getElementById('cron-beijing-hint').textContent = `≈ 北京时间 ${beijingTime}`;
+}
+
+function applyCronPreset() {
+  const preset = document.getElementById('cron-preset').value;
+  if (!preset) return;
+  const [hour, minute] = preset.split(' ');
+  document.getElementById('cron-hour').value = hour || '0';
+  document.getElementById('cron-minute').value = minute || '0';
+  document.getElementById('cron-preset').value = '';
+  updateCronPreview();
+  saveAll();
+}
+
+/* ============================================================
+   导入配置
+   ============================================================ */
+function importConfig() {
+  document.getElementById('import-file-input').click();
+}
+
+function handleFileImport(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const text = e.target.result;
+    const filename = file.name.toLowerCase();
+
+    try {
+      if (filename.endsWith('.yaml') || filename.endsWith('.yml')) {
+        parseYamlConfig(text);
+        showToast('✅ 已导入 config.yaml 配置', 'success');
+      } else if (filename.endsWith('.env') || filename.endsWith('.txt')) {
+        parseEnvConfig(text);
+        showToast('✅ 已导入 .env 配置', 'success');
+      } else {
+        // 尝试自动识别
+        if (text.includes('checkin:') || text.includes('posting:')) {
+          parseYamlConfig(text);
+        } else {
+          parseEnvConfig(text);
+        }
+        showToast('✅ 已导入配置', 'success');
+      }
+    } catch (err) {
+      showToast('❌ 导入失败：文件格式不正确', 'error');
+      console.error(err);
+    }
+
+    initForm();
+    saveAll();
+  };
+  reader.readAsText(file);
+
+  // 清除文件选择，允许重复导入同一文件
+  event.target.value = '';
+}
+
+function parseYamlConfig(text) {
+  // 简易 YAML 解析器（处理本项目使用的 YAML 子集）
+  const lines = text.split('\n');
+  let section = '';
+  let currentTopic = null;
+
+  // 重置签到和发帖话题
+  config.checkinTopics = [];
+  config.postTopics = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\r$/, '');
+    const trimmed = line.trim();
+
+    // 跳过空行和注释
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    // 检测 section
+    if (trimmed === 'checkin:' || trimmed.startsWith('checkin:')) {
+      section = 'checkin';
+      continue;
+    }
+    if (trimmed === 'posting:' || trimmed.startsWith('posting:')) {
+      section = 'posting';
+      continue;
+    }
+    if (trimmed === 'notification:' || trimmed.startsWith('notification:')) {
+      section = 'notification';
+      continue;
+    }
+    if (trimmed === 'topics:') continue;
+
+    // 子字段
+    if (section === 'checkin') {
+      if (trimmed.startsWith('- name:')) {
+        currentTopic = {
+          name: extractYamlValue(trimmed.replace(/^- name:\s*/, '')),
+          containerid: ''
+        };
+        config.checkinTopics.push(currentTopic);
+      } else if (currentTopic && trimmed.startsWith('containerid:')) {
+        currentTopic.containerid = extractYamlValue(trimmed.replace(/^containerid:\s*/, ''));
+      }
+    } else if (section === 'posting') {
+      if (trimmed.startsWith('enabled:')) {
+        const v = extractYamlValue(trimmed.replace(/^enabled:\s*/, '')).toLowerCase();
+        config.postingEnabled = v !== 'false' && v !== '0' && v !== 'no';
+      } else if (trimmed.startsWith('- ')) {
+        // 发帖话题列表项
+        const topicName = extractYamlValue(trimmed.replace(/^-\s*/, ''));
+        if (topicName) config.postTopics.push(topicName);
+      } else if (trimmed.startsWith('style:')) {
+        config.postStyle = extractYamlValue(trimmed.replace(/^style:\s*/, ''));
+      } else if (trimmed.startsWith('min_words:')) {
+        config.postMinWords = parseInt(extractYamlValue(trimmed.replace(/^min_words:\s*/, ''))) || 50;
+      } else if (trimmed.startsWith('max_words:')) {
+        config.postMaxWords = parseInt(extractYamlValue(trimmed.replace(/^max_words:\s*/, ''))) || 200;
+      }
+    } else if (section === 'notification') {
+      if (trimmed.startsWith('enabled:')) {
+        const v = extractYamlValue(trimmed.replace(/^enabled:\s*/, '')).toLowerCase();
+        config.notifyEnabled = v !== 'false' && v !== '0' && v !== 'no';
+      } else if (trimmed.startsWith('provider:')) {
+        config.notifyProvider = extractYamlValue(trimmed.replace(/^provider:\s*/, ''));
+      }
+    }
+  }
+}
+
+function parseEnvConfig(text) {
+  const lines = text.split('\n');
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\r$/, '').trim();
+    if (!line || line.startsWith('#')) continue;
+    if (!line.includes('=')) continue;
+
+    const idx = line.indexOf('=');
+    const key = line.substring(0, idx).trim();
+    let value = line.substring(idx + 1).trim();
+    // 移除引号
+    if ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+
+    switch (key) {
+      case 'WEIBO_COOKIE':
+        config.weiboCookie = value.startsWith('你的') ? '' : value;
+        break;
+      case 'AI_PROVIDER':
+        config.aiProvider = value;
+        break;
+      case 'AI_API_KEY':
+        config.aiApiKey = value.startsWith('你的') ? '' : value;
+        break;
+      case 'AI_API_BASE':
+        config.aiApiBase = value;
+        break;
+      case 'AI_MODEL':
+        config.aiModel = value;
+        break;
+      case 'NOTIFY_PROVIDER':
+        config.notifyProvider = value;
+        break;
+      case 'NOTIFY_TOKEN':
+        config.notifyToken = value.startsWith('你的') ? '' : value;
+        break;
+      case 'NOTIFY_CHAT_ID':
+        config.notifyChatId = value.startsWith('你的') ? '' : value;
+        break;
+    }
+  }
+}
+
+function extractYamlValue(str) {
+  str = str.trim();
+  // 移除引号
+  if ((str.startsWith('"') && str.endsWith('"')) ||
+      (str.startsWith("'") && str.endsWith("'"))) {
+    return str.slice(1, -1);
+  }
+  return str;
+}
+
+/* ============================================================
+   工具函数
+   ============================================================ */
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function showToast(msg, type) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.className = `toast ${type || ''} show`;
+  clearTimeout(toast._timeout);
+  toast._timeout = setTimeout(() => {
+    toast.classList.remove('show');
+  }, 2500);
+}
+
+function resetAll() {
+  if (!confirm('确定要恢复所有设置为默认值吗？当前配置将被清除。')) return;
+  config = JSON.parse(JSON.stringify(DEFAULTS));
+  initForm();
+  saveAll();
+  showToast('已恢复默认设置 ✓', 'success');
+}
+
+/* ============================================================
+   服务器同步
+   ============================================================ */
+let serverAvailable = false;
+let serverBase = '';
+
+function detectServer() {
+  // 检测是否通过 admin_server.py 提供服务
+  const host = window.location.hostname;
+  if (host === '127.0.0.1' || host === 'localhost' || host === '0.0.0.0') {
+    serverBase = window.location.origin;
+    return true;
+  }
+  return false;
+}
+
+async function checkServerConnection() {
+  if (!detectServer()) {
+    setServerStatus('offline', '离线模式');
+    return false;
+  }
+
+  setServerStatus('checking', '检测中...');
+  try {
+    const resp = await fetch(`${serverBase}/api/ping`, { method: 'POST' });
+    const data = await resp.json();
+    if (data.ok) {
+      setServerStatus('online', '已连接 · 自动同步');
+      serverAvailable = true;
+      return true;
+    }
+  } catch (e) {
+    // 服务器不可用
+  }
+  setServerStatus('offline', '离线模式');
+  serverAvailable = false;
+  return false;
+}
+
+function setServerStatus(status, text) {
+  const el = document.getElementById('server-status');
+  if (el) {
+    el.className = `server-status ${status}`;
+    el.querySelector('.status-text').textContent = text;
+  }
+}
+
+async function loadFromServer() {
+  try {
+    // 并行加载 config.yaml 和 .env
+    const [configResp, envResp] = await Promise.all([
+      fetch(`${serverBase}/api/config`),
+      fetch(`${serverBase}/api/env`),
+    ]);
+
+    if (configResp.ok) {
+      const configData = await configResp.json();
+      if (configData.ok && configData.data) {
+        applyServerConfig(configData.data);
+        logger('已从服务器加载 config.yaml');
+      }
+    }
+
+    if (envResp.ok) {
+      const envData = await envResp.json();
+      if (envData.ok && envData.data) {
+        applyServerEnv(envData.data);
+        logger('已从服务器加载 .env');
+      }
+    }
+
+    return true;
+  } catch (e) {
+    logger('从服务器加载配置失败: ' + e.message);
+    return false;
+  }
+}
+
+function applyServerConfig(data) {
+  // 解析 config.yaml 数据到 config 对象
+  if (data.checkin && data.checkin.topics) {
+    config.checkinTopics = data.checkin.topics.map(t => ({
+      name: t.name || '',
+      containerid: t.containerid || '',
+    }));
+  }
+  if (data.posting) {
+    const p = data.posting;
+    if (p.enabled !== undefined) config.postingEnabled = p.enabled;
+    if (p.topics) config.postTopics = p.topics;
+    if (p.style) config.postStyle = p.style;
+    if (p.min_words !== undefined) config.postMinWords = p.min_words;
+    if (p.max_words !== undefined) config.postMaxWords = p.max_words;
+    if (p.temperature !== undefined) config.aiTemperature = p.temperature;
+    if (p.max_tokens !== undefined) config.aiMaxTokens = p.max_tokens;
+  }
+  if (data.notification) {
+    const n = data.notification;
+    if (n.enabled !== undefined) config.notifyEnabled = n.enabled;
+    if (n.provider) config.notifyProvider = n.provider;
+  }
+}
+
+function applyServerEnv(data) {
+  if (data.WEIBO_COOKIE) config.weiboCookie = data.WEIBO_COOKIE;
+  if (data.AI_PROVIDER) config.aiProvider = data.AI_PROVIDER;
+  if (data.AI_API_KEY) config.aiApiKey = data.AI_API_KEY;
+  if (data.AI_API_BASE) config.aiApiBase = data.AI_API_BASE;
+  if (data.AI_MODEL) config.aiModel = data.AI_MODEL;
+  if (data.NOTIFY_PROVIDER) config.notifyProvider = data.NOTIFY_PROVIDER;
+  if (data.NOTIFY_TOKEN) config.notifyToken = data.NOTIFY_TOKEN;
+  if (data.NOTIFY_CHAT_ID) config.notifyChatId = data.NOTIFY_CHAT_ID;
+}
+
+async function saveToServer() {
+  if (!serverAvailable) return;
+
+  collectFormData();
+
+  // 构建 config.yaml 数据
+  const yamlData = {
+    checkin: {
+      topics: (config.checkinTopics || []).map(t => {
+        const entry = { name: t.name };
+        if (t.containerid) entry.containerid = t.containerid;
+        return entry;
+      }),
+    },
+    posting: {
+      enabled: config.postingEnabled,
+      topics: config.postTopics || [],
+      style: config.postStyle,
+      min_words: config.postMinWords,
+      max_words: config.postMaxWords,
+      temperature: config.aiTemperature,
+      max_tokens: config.aiMaxTokens,
+    },
+    notification: {
+      enabled: config.notifyEnabled,
+      provider: config.notifyProvider,
+    },
+  };
+
+  // 构建 .env 数据
+  const envData = {};
+  if (config.weiboCookie) envData.WEIBO_COOKIE = config.weiboCookie;
+  envData.AI_PROVIDER = config.aiProvider;
+  if (config.aiApiKey) envData.AI_API_KEY = config.aiApiKey;
+  if (config.aiApiBase) envData.AI_API_BASE = config.aiApiBase;
+  if (config.aiModel) envData.AI_MODEL = config.aiModel;
+  envData.NOTIFY_PROVIDER = config.notifyProvider;
+  if (config.notifyToken) envData.NOTIFY_TOKEN = config.notifyToken;
+  if (config.notifyChatId) envData.NOTIFY_CHAT_ID = config.notifyChatId;
+
+  try {
+    const [configResp, envResp] = await Promise.all([
+      fetch(`${serverBase}/api/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(yamlData),
+      }),
+      fetch(`${serverBase}/api/env`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(envData),
+      }),
+    ]);
+
+    if (configResp.ok && envResp.ok) {
+      logger('配置已同步到本地文件 ✓');
+    }
+  } catch (e) {
+    setServerStatus('offline', '同步失败');
+    serverAvailable = false;
+    logger('同步失败: ' + e.message);
+  }
+}
+
+// 防抖版本的 saveToServer
+const debouncedSaveToServer = debounceFn(() => saveToServer(), 800);
+
+function logger(msg) {
+  console.log(`[后台系统] ${msg}`);
+}
+
+/* ============================================================
+   初始化
+   ============================================================ */
+async function init() {
+  // 1. 检查服务器连接
+  const connected = await checkServerConnection();
+
+  // 2. 如果连接了服务器，从服务器加载配置（覆盖 localStorage）
+  if (connected) {
+    await loadFromServer();
+    // 服务器数据加载后同步到 localStorage
+    try {
+      localStorage.setItem('weibo-config', JSON.stringify(config));
+    } catch (e) { /* ignore */ }
+  }
+
+  // 3. 渲染表单
+  initForm();
+  updateAllPreviews();
+
+  // 4. 监听表单变化
+  document.querySelectorAll('input, select, textarea').forEach(el => {
+    if (!el.closest('#checkin-list') && !el.closest('#post-topic-list')) {
+      el.addEventListener('change', () => {
+        saveAll();
+        if (serverAvailable) debouncedSaveToServer();
+      });
+      el.addEventListener('input', () => {
+        debounce(saveAll, 500)();
+        if (serverAvailable) debouncedSaveToServer();
+      });
+    }
+  });
+}
+
+function debounce(fn, delay) {
+  let timer;
+  return function(...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+
+function debounceFn(fn, delay) {
+  let timer;
+  return function(...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+
+// 页面加载完成后初始化
+document.addEventListener('DOMContentLoaded', init);
+
+// 页面离开前保存
+window.addEventListener('beforeunload', () => {
+  collectFormData();
+  try {
+    localStorage.setItem('weibo-config', JSON.stringify(config));
+  } catch (e) { /* ignore */ }
+});
+</script>
+
+</body>
+</html>

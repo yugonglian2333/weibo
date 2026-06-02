@@ -1,180 +1,78 @@
 # 微博超话自动签到 + AI 发帖
 
-每天自动在指定的微博超话下签到，并使用 AI 生成帖子内容发布到微博。
-
-部署在 **GitHub Actions** 上，免费、无需服务器、每天定时自动运行。
+每天自动签到指定超话，并用 AI 生成内容发布微博。部署在 GitHub Actions，免费免服务器。
 
 ## 功能
 
-- ✅ **超话签到**：支持多个超话，自动搜索 containerid 或手动指定
-- 🤖 **AI 发帖**：可插拔设计，支持小米 Mimo / Claude / OpenAI 及其他兼容接口
-- ⏰ **定时执行**：GitHub Actions Cron 每天自动触发
-- 📋 **日志记录**：清晰的执行日志，签到/发帖结果一目了然
-- 🔒 **安全**：Cookie 和 API Key 存储在 GitHub Secrets，不会泄露
+- ✅ **超话签到** — 支持多个超话，自动搜索 containerid
+- 🤖 **AI 发帖** — 可插拔设计，支持 Mimo / Claude / OpenAI
+- 📬 **通知推送** — 微信/Telegram 推送每日执行报告
+- 🎛️ **可视化管理** — 本地后台系统，一站式配置
 
-## 快速开始
-
-### 1. Fork 或创建仓库
-
-把这个项目上传到 GitHub 仓库。
-
-### 2. 获取微博 Cookie
-
-1. 在浏览器中登录 [微博](https://m.weibo.cn/)
-2. 按 `F12` 打开开发者工具 → Application → Cookies → `https://m.weibo.cn`
-3. 复制所有 Cookie，拼接成字符串，格式如：
-   ```
-   SUB=xxx; SUBP=xxx; XSRF-TOKEN=xxx; ...
-   ```
-
-> **提示**：Cookie 通常有效期很长（几个月），失效后重新获取即可。
-
-### 3. 配置 GitHub Secrets
-
-在仓库的 **Settings → Secrets and variables → Actions** 中添加：
-
-| Secret 名称 | 必填 | 说明 |
-|-------------|------|------|
-| `WEIBO_COOKIE` | ✅ | 微博登录 Cookie 字符串 |
-| `AI_API_KEY` | ✅ | AI 服务的 API Key |
-| `AI_PROVIDER` | ❌ | AI 服务商，默认 `mimo` |
-| `AI_API_BASE` | ❌ | AI API 地址（Mimo 等自建服务需填） |
-| `AI_MODEL` | ❌ | 模型名称 |
-| `NOTIFY_PROVIDER` | ❌ | 通知渠道，默认 `pushplus` |
-| `NOTIFY_TOKEN` | ❌ | 通知渠道的 Token（PushPlus 或 Server酱） |
-| `NOTIFY_CHAT_ID` | ❌ | Telegram chat_id（仅 Telegram 需要） |
-
-### 4. 配置通知推送（推荐）
-
-每天签到完成后，通过微信收到任务执行报告，不用每次去 GitHub 看日志。
-
-**推荐 PushPlus（免费、最简单）：**
-
-1. 访问 [pushplus.plus](http://www.pushplus.plus/)，微信扫码登录
-2. 在「发送消息」→「一对一发送」页面复制你的 **Token**
-3. 在 GitHub Secrets 中添加：
-   - `NOTIFY_PROVIDER` → `pushplus`
-   - `NOTIFY_TOKEN` → 你复制的 Token
-
-> 也可以使用 **Server酱**（sct.ftqq.com），同样微信扫码即可。在 Secrets 中设置 `NOTIFY_PROVIDER=serverchan` 即可。
-
-### 5. 修改超话列表
-
-编辑仓库中的 `config.yaml`：
-
-```yaml
-checkin:
-  topics:
-    - name: "你的超话名称1"
-    - name: "你的超话名称2"
-      containerid: "100808xxxxx"  # 可选，不填自动搜索
-
-posting:
-  enabled: true
-  topics:
-    - "你的超话名称1"
-  style: "自然随性"   # 自然随性 / 专业严谨 / 幽默风趣 / 文艺清新
-
-notification:
-  enabled: true        # 是否开启通知
-  provider: pushplus   # pushplus / serverchan / telegram
-```
-
-### 6. 修改执行时间（可选）
-
-编辑 `.github/workflows/daily.yml` 中的 cron 表达式：
-
-```yaml
-schedule:
-  - cron: '0 0 * * *'  # UTC 0:00 = 北京时间 8:00
-```
-
-> **注意**：GitHub Actions 的 cron 使用 **UTC 时间**，北京时间 = UTC + 8 小时。
->
-> 示例：
-> - `0 22 * * *` = 北京时间早上 6:00
-> - `0 0 * * *` = 北京时间早上 8:00
-> - `0 2 * * *` = 北京时间早上 10:00
-
-### 7. 推送代码
-
-推送后 GitHub Actions 会自动开始每天执行。你也可以在 Actions 页面手动点击 **Run workflow** 立即测试。
-
-## 本地运行
+## 快速开始（推荐）
 
 ```bash
 # 1. 安装依赖
-pip install -r requirements.txt
+py -m pip install -r requirements.txt
 
-# 2. 设置环境变量
-export WEIBO_COOKIE="你的Cookie"
-export AI_API_KEY="你的AI_API_Key"
-export AI_PROVIDER="mimo"          # 可选
-export AI_API_BASE="https://..."   # 可选
-export NOTIFY_PROVIDER="pushplus" # 可选，开启微信通知
-export NOTIFY_TOKEN="你的Token"   # 可选
-
-# 3. 运行
-python main.py
+# 2. 启动后台管理系统（二选一）
+py admin_server.py          # 命令行启动
+# 或双击 start_admin.bat    # 一键启动
 ```
 
-## 更换 AI 服务
+浏览器会自动打开配置页面，填写以下必填项：
 
-### 切换到 Claude
+| 配置项 | 说明 |
+|--------|------|
+| 超话列表 | 要签到的超话名称 |
+| 微博 Cookie | 浏览器登录 m.weibo.cn 后复制 |
+| AI API Key | AI 服务商的 API Key |
 
-1. 在 GitHub Secrets 中设置：`AI_PROVIDER=claude`
-2. 安装依赖（或在 workflow 中取消注释 `pip install anthropic`）
+其他配置（发帖风格、通知渠道等）按需调整。**修改自动保存到本地文件**。
 
-### 切换到 OpenAI 或其他兼容接口
+## 部署到 GitHub Actions
 
-1. 设置：`AI_PROVIDER=openai`
-2. 设置 `AI_API_BASE` 为对应地址
-3. 设置 `AI_MODEL` 为对应模型名
+1. 将项目推送到 GitHub 仓库
+2. 在 Settings → Secrets → Actions 中添加 Secrets（参考后台系统导出的 GitHub Secrets 列表）
+3. GitHub Actions 会每天自动执行
 
-### 添加自定义 AI Provider
+## 环境变量
 
-编辑 `ai_provider.py`：
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `WEIBO_COOKIE` | ✅ | 微博 Cookie |
+| `AI_PROVIDER` | ❌ | AI 服务商，默认 `mimo` |
+| `AI_API_KEY` | ✅ | AI API Key |
+| `AI_API_BASE` | ❌ | API 地址 |
+| `AI_MODEL` | ❌ | 模型名称 |
+| `NOTIFY_PROVIDER` | ❌ | 通知渠道：pushplus / serverchan / telegram |
+| `NOTIFY_TOKEN` | ❌ | 通知 Token |
+| `NOTIFY_CHAT_ID` | ❌ | Telegram chat_id |
 
-```python
-class MyProvider(AIProvider):
-    @classmethod
-    def name(cls):
-        return "my_provider"
+## 手动运行
 
-    def generate_post(self, topics, style="自然随性"):
-        # 你的实现
-        ...
-
-# 注册
-register_provider("my_provider", MyProvider)
+```bash
+py main.py
 ```
-
-然后在 Secrets 中设置 `AI_PROVIDER=my_provider`。
 
 ## 项目结构
 
 ```
-weibo-bot/
-├── .github/workflows/daily.yml   # GitHub Actions 定时任务
-├── main.py                       # 主入口
-├── weibo_client.py               # 微博 API（签到 + 发帖）
-├── ai_provider.py                # AI 接口（可插拔）
-├── notifier.py                   # 通知推送（可插拔，微信等）
-├── config.yaml                   # 超话列表等配置
-├── requirements.txt              # Python 依赖
-└── README.md
+├── admin.html              # 后台系统前端
+├── admin_server.py         # 后台系统服务器（一键启动）
+├── main.py                 # 主入口
+├── weibo_client.py         # 微博 API（签到 + 发帖）
+├── ai_provider.py          # AI 接口（可插拔）
+├── notifier.py             # 通知推送（可插拔）
+├── config.yaml             # 超话列表等配置
+├── .env                    # 敏感信息（本地）
+└── .github/workflows/      # GitHub Actions 定时任务
 ```
 
 ## 常见问题
 
-**Q: Cookie 多久会过期？**
-A: 通常几个月，失效后重新获取并更新 Secrets 即可。
+**Q: Cookie 多久过期？** 通常几个月，失效后重新获取即可。
 
-**Q: 签到失败怎么办？**
-A: 检查超话名称是否正确，或手动填入 containerid。GitHub Actions 中失败的执行会标红，你可以随时查看日志。
+**Q: 签到失败？** 检查超话名称是否正确，或在后台系统中手动填入 containerid。
 
-**Q: GitHub Actions 免费额度够用吗？**
-A: 完全够用。公开仓库无限免费，私有仓库每月 2000 分钟。每天运行不到 1 分钟。
-
-**Q: 如何确认脚本正常工作？**
-A: 在仓库的 Actions 页面查看每次执行的日志，签到和发帖结果都有清晰输出。
+**Q: GitHub Actions 额度？** 公开仓库无限免费，每天运行不到 1 分钟。

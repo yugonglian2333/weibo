@@ -228,6 +228,10 @@ def run_posting(
     topics: list[str],
     style: str = "自然随性",
     topic_containerid_map: dict[str, str] = None,
+    min_words: int = 50,
+    max_words: int = 200,
+    temperature: float = 0.9,
+    max_tokens: int = 4096,
 ) -> list[dict]:
     """
     执行 AI 发帖：每个话题独立生成一条微博并发布到对应超话
@@ -238,6 +242,10 @@ def run_posting(
         topics: 发帖涉及的话题列表（每个话题单独生成一条微博）
         style: 发帖风格
         topic_containerid_map: 话题名 -> containerid 映射，用于超话内发帖
+        min_words: AI 生成内容最少字数
+        max_words: AI 生成内容最多字数
+        temperature: AI 生成随机性参数
+        max_tokens: AI 生成最大 token 数
 
     Returns:
         发帖结果列表，每个元素为 {"topic": str, "success": bool, "content": str, "message": str, ...}
@@ -251,7 +259,7 @@ def run_posting(
 
     logger.info(f"===== AI 发帖开始（共 {len(topics)} 个话题）=====")
     logger.info(f"话题: {', '.join(topics)}")
-    logger.info(f"风格: {style}")
+    logger.info(f"风格: {style}，字数: {min_words}-{max_words}，temperature: {temperature}")
 
     results = []
 
@@ -260,7 +268,14 @@ def run_posting(
 
         # 1. 为每个话题单独调用 AI
         logger.info(f"正在调用 AI 为「{topic}」生成帖子内容...")
-        content = ai_provider.generate_post(topics=[topic], style=style)
+        content = ai_provider.generate_post(
+            topics=[topic],
+            style=style,
+            min_words=min_words,
+            max_words=max_words,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
 
         if not content:
             logger.warning(f"AI 为「{topic}」生成内容失败，跳过发帖")
@@ -344,6 +359,10 @@ def main():
     posting_enabled = posting_config.get("enabled", True)
     posting_topics = posting_config.get("topics", [])
     posting_style = posting_config.get("style", "自然随性")
+    posting_min_words = posting_config.get("min_words", 50)
+    posting_max_words = posting_config.get("max_words", 200)
+    posting_temperature = posting_config.get("temperature", 0.9)
+    posting_max_tokens = posting_config.get("max_tokens", 4096)
 
     post_results = []
     if posting_enabled and posting_topics:
@@ -379,7 +398,11 @@ def main():
             # 初始化 AI Provider
             ai = create_provider_from_env()
             post_results = run_posting(
-                client, ai, posting_topics, posting_style, topic_to_cid
+                client, ai, posting_topics, posting_style, topic_to_cid,
+                min_words=posting_min_words,
+                max_words=posting_max_words,
+                temperature=posting_temperature,
+                max_tokens=posting_max_tokens,
             )
         except ValueError as e:
             logger.error(f"AI Provider 初始化失败: {e}")
