@@ -36,4 +36,7 @@ jobs:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_API_BASE: ${{ secrets.AI_API_BASE }}
           AI_MODEL: ${{ secrets.AI_MODEL }}
+          NOTIFY_PROVIDER: ${{ secrets.NOTIFY_PROVIDER }}
+          NOTIFY_TOKEN: ${{ secrets.NOTIFY_TOKEN }}
+          NOTIFY_CHAT_ID: ${{ secrets.NOTIFY_CHAT_ID }}
         run: python main.py

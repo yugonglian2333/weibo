@@ -40,8 +40,25 @@
 | `AI_PROVIDER` | ❌ | AI 服务商，默认 `mimo` |
 | `AI_API_BASE` | ❌ | AI API 地址（Mimo 等自建服务需填） |
 | `AI_MODEL` | ❌ | 模型名称 |
+| `NOTIFY_PROVIDER` | ❌ | 通知渠道，默认 `pushplus` |
+| `NOTIFY_TOKEN` | ❌ | 通知渠道的 Token（PushPlus 或 Server酱） |
+| `NOTIFY_CHAT_ID` | ❌ | Telegram chat_id（仅 Telegram 需要） |
 
-### 4. 修改超话列表
+### 4. 配置通知推送（推荐）
+
+每天签到完成后，通过微信收到任务执行报告，不用每次去 GitHub 看日志。
+
+**推荐 PushPlus（免费、最简单）：**
+
+1. 访问 [pushplus.plus](http://www.pushplus.plus/)，微信扫码登录
+2. 在「发送消息」→「一对一发送」页面复制你的 **Token**
+3. 在 GitHub Secrets 中添加：
+   - `NOTIFY_PROVIDER` → `pushplus`
+   - `NOTIFY_TOKEN` → 你复制的 Token
+
+> 也可以使用 **Server酱**（sct.ftqq.com），同样微信扫码即可。在 Secrets 中设置 `NOTIFY_PROVIDER=serverchan` 即可。
+
+### 5. 修改超话列表
 
 编辑仓库中的 `config.yaml`：
 
@@ -57,9 +74,13 @@ posting:
   topics:
     - "你的超话名称1"
   style: "自然随性"   # 自然随性 / 专业严谨 / 幽默风趣 / 文艺清新
+
+notification:
+  enabled: true        # 是否开启通知
+  provider: pushplus   # pushplus / serverchan / telegram
 ```
 
-### 5. 修改执行时间（可选）
+### 6. 修改执行时间（可选）
 
 编辑 `.github/workflows/daily.yml` 中的 cron 表达式：
 
@@ -75,7 +96,7 @@ schedule:
 > - `0 0 * * *` = 北京时间早上 8:00
 > - `0 2 * * *` = 北京时间早上 10:00
 
-### 6. 推送代码
+### 7. 推送代码
 
 推送后 GitHub Actions 会自动开始每天执行。你也可以在 Actions 页面手动点击 **Run workflow** 立即测试。
 
@@ -90,6 +111,8 @@ export WEIBO_COOKIE="你的Cookie"
 export AI_API_KEY="你的AI_API_Key"
 export AI_PROVIDER="mimo"          # 可选
 export AI_API_BASE="https://..."   # 可选
+export NOTIFY_PROVIDER="pushplus" # 可选，开启微信通知
+export NOTIFY_TOKEN="你的Token"   # 可选
 
 # 3. 运行
 python main.py
@@ -136,6 +159,7 @@ weibo-bot/
 ├── main.py                       # 主入口
 ├── weibo_client.py               # 微博 API（签到 + 发帖）
 ├── ai_provider.py                # AI 接口（可插拔）
+├── notifier.py                   # 通知推送（可插拔，微信等）
 ├── config.yaml                   # 超话列表等配置
 ├── requirements.txt              # Python 依赖
 └── README.md

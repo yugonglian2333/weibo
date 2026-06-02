@@ -18,6 +18,8 @@ import sys
 import time
 from datetime import datetime, timezone, timedelta
 
+logger = logging.getLogger(__name__)
+
 # 尝试导入 yaml，如果没有则使用简单的配置方式
 try:
     import yaml
@@ -28,6 +30,10 @@ except ImportError:
 
 from weibo_client import WeiboClient
 from ai_provider import create_provider_from_env
+from notifier import (
+    create_notifier_from_env,
+    build_notification,
+)
 
 
 # ============================================================
@@ -301,6 +307,30 @@ def main():
     if post_result:
         logger.info(f"发帖: {'成功 ✅' if post_success else '失败 ❌'}")
     logger.info("=" * 50)
+
+    # ---- 6. 发送通知 ----
+    notification_config = config.get("notification", {})
+    notify_enabled = notification_config.get("enabled", True)
+
+    if notify_enabled:
+        logger.info("=" * 50)
+        logger.info("发送通知")
+        logger.info("=" * 50)
+
+        try:
+            notifier = create_notifier_from_env()
+            if notifier:
+                title, content = build_notification(
+                    checkin_results, post_result
+                )
+                if notifier.send(title, content):
+                    logger.info("通知已发送")
+                else:
+                    logger.warning("通知发送失败，不影响主流程")
+            else:
+                logger.info("未配置通知渠道，跳过")
+        except Exception as e:
+            logger.error(f"通知模块异常，不影响主流程: {e}")
 
     # 如果有任何失败，返回非零退出码（GitHub Actions 会标记为失败）
     if not all_success or (post_result and not post_success):
