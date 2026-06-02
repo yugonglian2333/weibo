@@ -114,7 +114,11 @@ class WeiboClient:
                     raw_preview = resp.text[:500]
                 except Exception:
                     pass
-            logger.error(
+
+            # 若响应是 HTML（如被反爬拦截），属于预期行为，降级为 WARNING
+            is_html = raw_preview.strip().startswith('<!') or raw_preview.strip().startswith('<html')
+            log_level = logger.warning if is_html else logger.error
+            log_level(
                 f"JSON 解析失败 [{method} {url}]: {e}"
                 f" | status={resp_status}"
                 f" | 响应预览: {raw_preview}"
@@ -130,7 +134,11 @@ class WeiboClient:
                     raw_preview = e.response.text[:500]
             except Exception:
                 pass
-            logger.error(
+
+            # 403 且来自 weibo.com 属于反爬拦截（预期行为），降级为 WARNING
+            is_expected_403 = (resp_status == 403 and 'weibo.com' in url)
+            log_level = logger.warning if is_expected_403 else logger.error
+            log_level(
                 f"请求失败 [{method} {url}]: {e}"
                 f" | status={resp_status}"
                 f" | 响应预览: {raw_preview}"
@@ -148,7 +156,14 @@ class WeiboClient:
         has_pc_cookie = bool(cookie_dict.get("PC_TOKEN") or cookie_dict.get("_s_tentry"))
         has_mobile_cookie = bool(cookie_dict.get("M_WEIBOCN_PARAMS") or cookie_dict.get("MLOGIN"))
 
-        # 方式一：m.weibo.cn 移动端 API（仅当有移动端 Cookie 时尝试）
+        # 有 PC 端 Cookie → 直接判定有效（后续走 Playwright 路线）
+        # 无需浪费时间去尝试明知会失败的移动端 API / PC 端 API
+        if has_pc_cookie:
+            logger.info("检测到 PC 端 Cookie（PC_TOKEN/_s_tentry），登录态有效。")
+            logger.info("签到时将使用 Playwright 浏览器绕过反爬系统。")
+            return True
+
+        # 纯移动端 Cookie → 调用移动端 API 验证
         if has_mobile_cookie:
             url = f"{self.API_BASE}/config"
             data = self._request("GET", url)
@@ -158,27 +173,9 @@ class WeiboClient:
                 uid = data.get("data", {}).get("uid", "未知")
                 logger.info(f"Cookie 有效（移动端），当前登录用户 UID: {uid}")
                 return True
-            logger.info("移动端验证未通过...")
-        else:
-            logger.info("无移动端专用 Cookie，跳过移动端验证")
+            logger.warning("移动端验证未通过...")
 
-        # 方式二：weibo.com PC 端 API（仅当有 PC 端 Cookie 时尝试）
-        if has_pc_cookie:
-            logger.info("尝试 PC 端 API 验证...")
-            pc_url = "https://weibo.com/ajax/config"
-            pc_data = self._request("GET", pc_url)
-            logger.info(f"weibo.com/ajax/config 响应: {pc_data}")
-
-            if pc_data and pc_data.get("data", {}).get("login"):
-                uid = pc_data.get("data", {}).get("uid", "未知")
-                logger.info(f"Cookie 有效（PC 端），当前登录用户 UID: {uid}")
-                return True
-            # PC 端 API 可能被 Sina Visitor System 403 拦截，不算失败
-            logger.info("PC 端 API 验证未通过（可能被反爬拦截，不影响签到 API）")
-        else:
-            logger.info("无 PC 端专用 Cookie，跳过 PC 端验证")
-
-        # 方式三：尝试访问超话页面验证 Cookie 是否有效
+        # 尝试访问超话页面作为最后手段
         logger.info("尝试通过访问超话页面验证 Cookie...")
         test_url = (
             f"{self.API_BASE}/container/getIndex"
@@ -187,14 +184,6 @@ class WeiboClient:
         test_data = self._request("GET", test_url)
         if test_data is not None and test_data.get("ok") == 1:
             logger.info("Cookie 似乎有效（超话页面可访问）")
-            return True
-
-        # 方式四：如果以上都失败但有 PC 端 Cookie，假定有效
-        # （PC 端 Cookie 无法通过 m.weibo.cn API 验证，但可以通过
-        #   Playwright 浏览器调用 weibo.com API 正常工作）
-        if has_pc_cookie:
-            logger.info("检测到 PC 端 Cookie（PC_TOKEN/_s_tentry），假定有效。")
-            logger.info("签到时将使用 Playwright 浏览器绕过反爬系统。")
             return True
 
         logger.warning("所有验证方式均失败，Cookie 可能已过期或无效")
@@ -304,51 +293,18 @@ class WeiboClient:
         cookie_dict = self._parse_cookie_string(self.cookie)
         has_pc_cookie = bool(cookie_dict.get("PC_TOKEN") or cookie_dict.get("_s_tentry"))
 
-        # ---- 方案 1（主力, PC 端 Cookie 存在时）: weibo.com 代理接口 ----
-        # 这是真正触发签到动作的接口，需要 PC 端 Cookie
+        # ---- 方案 1（主力, PC 端 Cookie 存在时）: Playwright 浏览器签到 ----
+        # requests 库 100% 会被 Sina Visitor System 拦截（返回 HTML），
+        # 因此直接走 Playwright，不再浪费时间尝试 requests
         if has_pc_cookie:
-            logger.info(f"检测到 PC 端 Cookie，优先使用 weibo.com 签到接口...")
-            checkin_url = (
-                "https://weibo.com/p/aj/general/button"
-                "?ajwvr=6"
-                "&api=http://i.huati.weibo.com/aj/super/checkin"
-                f"&id={containerid}"
-                "&location=page_100808_super_index"
-            )
-            headers = {
-                "Referer": f"https://weibo.com/p/{containerid}/super_index",
-            }
-
-            data = self._request("GET", checkin_url, headers=headers)
-
-            if data is not None:
-                code = data.get("code", "")
-                msg = data.get("msg", "")
-
-                if code == "100000":
-                    result["success"] = True
-                    result["message"] = f"✅ {topic_name} 签到成功（PC端API）: {msg}"
-                    logger.info(result["message"])
-                    return result
-                elif "已签到" in msg or "already" in msg.lower():
-                    result["success"] = True
-                    result["message"] = f"⏭ {topic_name} 今日已签到（PC端API）: {msg}"
-                    logger.info(result["message"])
-                    return result
-                else:
-                    result["message"] = f"❌ {topic_name} 签到失败（PC端API）: {msg} (code={code})"
-                    logger.warning(result["message"])
-                    return result
-            else:
-                # requests 被拦截（403），尝试用 Playwright 浏览器
-                logger.info(f"PC端签到请求失败（可能被反爬拦截），尝试 Playwright 方案...")
-                pw_result = self._checkin_with_playwright(containerid, topic_name)
-                if pw_result["success"]:
-                    return pw_result
-                logger.info(f"Playwright 方案也失败，回退到移动端方案...")
+            logger.info(f"检测到 PC 端 Cookie，使用 Playwright 浏览器签到...")
+            pw_result = self._checkin_with_playwright(containerid, topic_name)
+            if pw_result["success"]:
+                return pw_result
+            logger.info(f"Playwright 签到失败，回退到移动端方案...")
 
         # ---- 方案 2（备用）: 移动端签到按钮接口 ----
-        # 当没有 PC 端 Cookie 或 PC 端请求失败时使用
+        # 当没有 PC 端 Cookie 或 Playwright 方案失败时使用
         result = self._checkin_mobile_api(containerid, topic_name)
         return result
 

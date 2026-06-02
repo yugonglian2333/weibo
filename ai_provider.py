@@ -103,28 +103,14 @@ class MimoProvider(AIProvider):
         # https://.../v1         → OpenAI 协议
         is_anthropic = self.api_base.endswith("/anthropic")
 
-        # 构建两种协议的请求配置（404 时自动切换）
+        # 构建请求协议列表
+        # 注：Mimo 的 /anthropic 端点已知返回 404，因此优先尝试 OpenAI 协议
         protocols = []
         if is_anthropic:
-            # 优先 Anthropic 协议，备选 OpenAI 协议（去掉 /anthropic 后缀加 /v1）
-            protocols.append({
-                "name": "Anthropic",
-                "url": f"{self.api_base}/messages",
-                "payload": {
-                    "model": self.model,
-                    "max_tokens": 4096,
-                    "temperature": 0.9,
-                    "system": system_prompt,
-                    "messages": [
-                        {"role": "user", "content": "请生成一条微博帖子"},
-                    ],
-                },
-                "is_anthropic": True,
-            })
-            # 备选: 把 /anthropic 替换为 /v1，走 OpenAI 协议
+            # 优先 OpenAI 协议（已知可用），Anthropic 作备选
             openai_base = self.api_base.replace("/anthropic", "/v1")
             protocols.append({
-                "name": "OpenAI(备选)",
+                "name": "OpenAI",
                 "url": f"{openai_base}/chat/completions",
                 "payload": {
                     "model": self.model,
@@ -136,6 +122,20 @@ class MimoProvider(AIProvider):
                     "max_tokens": 4096,
                 },
                 "is_anthropic": False,
+            })
+            protocols.append({
+                "name": "Anthropic(备选)",
+                "url": f"{self.api_base}/messages",
+                "payload": {
+                    "model": self.model,
+                    "max_tokens": 4096,
+                    "temperature": 0.9,
+                    "system": system_prompt,
+                    "messages": [
+                        {"role": "user", "content": "请生成一条微博帖子"},
+                    ],
+                },
+                "is_anthropic": True,
             })
         else:
             protocols.append({
