@@ -18,6 +18,47 @@ import sys
 import time
 from datetime import datetime, timezone, timedelta
 
+
+def load_dotenv(env_path: str = None):
+    """
+    加载 .env 文件到环境变量（不覆盖已有环境变量）
+
+    这样本地开发时可以用 .env 文件管理配置，
+    GitHub Actions 中则通过 Secrets 传入（优先级更高）。
+    """
+    if env_path is None:
+        # 默认在脚本同级目录查找 .env
+        env_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            ".env",
+        )
+
+    if not os.path.exists(env_path):
+        return
+
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            # 跳过空行和注释
+            if not line or line.startswith("#"):
+                continue
+            # 解析 key=value
+            if "=" in line:
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip()
+                # 移除引号
+                if (value.startswith('"') and value.endswith('"')) or \
+                   (value.startswith("'") and value.endswith("'")):
+                    value = value[1:-1]
+                # 只在环境变量未设置时加载（环境变量优先级更高）
+                if key and key not in os.environ:
+                    os.environ[key] = value
+
+
+# 在模块加载时自动加载 .env
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
 # 尝试导入 yaml，如果没有则使用简单的配置方式
@@ -42,6 +83,16 @@ from notifier import (
 
 def setup_logging():
     """配置日志输出"""
+    # 修复 Windows 终端 GBK 编码问题：用 UTF-8 包装 stdout
+    if sys.platform == "win32":
+        sys.stdout = open(
+            sys.stdout.fileno(),
+            mode="w",
+            encoding="utf-8",
+            errors="replace",
+            closefd=False,
+        )
+
     # 北京时间时区
     tz_beijing = timezone(timedelta(hours=8))
 
@@ -154,7 +205,7 @@ def run_checkin(client: WeiboClient, topics: list[dict]) -> list[dict]:
             # 短暂延迟，避免请求过快
             time.sleep(1)
 
-        result = client.checkin_super_topic(containerid)
+        result = client.checkin_super_topic(containerid, topic_name=name)
         result["name"] = name
         results.append(result)
 
@@ -176,47 +227,77 @@ def run_posting(
     ai_provider,
     topics: list[str],
     style: str = "自然随性",
-) -> dict:
+    topic_containerid_map: dict[str, str] = None,
+) -> list[dict]:
     """
-    执行 AI 发帖
+    执行 AI 发帖：每个话题独立生成一条微博并发布到对应超话
 
     Args:
         client: WeiboClient 实例
         ai_provider: AIProvider 实例
-        topics: 发帖涉及的话题列表
+        topics: 发帖涉及的话题列表（每个话题单独生成一条微博）
         style: 发帖风格
+        topic_containerid_map: 话题名 -> containerid 映射，用于超话内发帖
 
     Returns:
-        发帖结果
+        发帖结果列表，每个元素为 {"topic": str, "success": bool, "content": str, "message": str, ...}
     """
     if not topics:
         logger.info("没有配置发帖话题，跳过 AI 发帖")
-        return {"success": False, "message": "未配置发帖话题"}
+        return []
 
-    logger.info(f"===== AI 发帖开始 =====")
+    if topic_containerid_map is None:
+        topic_containerid_map = {}
+
+    logger.info(f"===== AI 发帖开始（共 {len(topics)} 个话题）=====")
     logger.info(f"话题: {', '.join(topics)}")
     logger.info(f"风格: {style}")
 
-    # 1. 调用 AI 生成内容
-    logger.info("正在调用 AI 生成帖子内容...")
-    content = ai_provider.generate_post(topics=topics, style=style)
+    results = []
 
-    if not content:
-        return {
-            "success": False,
-            "message": "AI 内容生成失败，不发帖",
-            "content": "",
-        }
+    for i, topic in enumerate(topics):
+        logger.info(f"--- [{i+1}/{len(topics)}] 正在处理话题: {topic} ---")
 
-    logger.info(f"AI 生成内容:\n---\n{content}\n---")
+        # 1. 为每个话题单独调用 AI
+        logger.info(f"正在调用 AI 为「{topic}」生成帖子内容...")
+        content = ai_provider.generate_post(topics=[topic], style=style)
 
-    # 2. 发布到微博
-    logger.info("正在发布到微博...")
-    result = client.post_weibo(content)
-    result["content"] = content
+        if not content:
+            logger.warning(f"AI 为「{topic}」生成内容失败，跳过发帖")
+            results.append({
+                "topic": topic,
+                "success": False,
+                "message": "AI 内容生成失败",
+                "content": "",
+                "weibo_id": "",
+            })
+            continue
 
-    logger.info(f"===== 发帖完成 =====")
-    return result
+        logger.info(f"AI 生成内容 [{topic}]:\n---\n{content}\n---")
+
+        # 2. 发布到微博（传入 containerid 以发布到超话内部）
+        containerid = topic_containerid_map.get(topic)
+        if containerid:
+            logger.info(f"正在发布「{topic}」到超话内部 (containerid={containerid})...")
+        else:
+            logger.info(f"正在发布「{topic}」到微博（未找到 containerid，发布到个人主页）...")
+
+        result = client.post_weibo(content, containerid=containerid)
+        result["topic"] = topic
+        result["content"] = content
+        results.append(result)
+
+        logger.info(f"「{topic}」发帖结果: {result['message']}")
+
+        # 多条帖子之间间隔，避免被限流
+        if i < len(topics) - 1:
+            time.sleep(3)
+
+    # 汇总
+    success_count = sum(1 for r in results if r["success"])
+    logger.info(f"===== 发帖完成: {success_count}/{len(topics)} 成功 =====")
+
+    return results
 
 
 # ============================================================
@@ -264,13 +345,41 @@ def main():
     posting_topics = posting_config.get("topics", [])
     posting_style = posting_config.get("style", "自然随性")
 
-    post_result = None
+    post_results = []
     if posting_enabled and posting_topics:
+        # 预先解析每个话题的 containerid，用于超话内发帖
+        topic_to_cid = {}
+        # 先从 checkin topics 中查找已有的 containerid
+        for topic_name in posting_topics:
+            for ct in config.get("checkin", {}).get("topics", []):
+                if ct.get("name") == topic_name and ct.get("containerid"):
+                    topic_to_cid[topic_name] = ct["containerid"]
+                    logger.info(
+                        f"话题「{topic_name}」-> containerid: {ct['containerid']}（来自签到配置）"
+                    )
+                    break
+
+        # 如果签到配置中没有，再通过 API 搜索
+        for topic_name in posting_topics:
+            if topic_name in topic_to_cid:
+                continue
+            cid = client.get_containerid_by_name(topic_name)
+            if cid:
+                topic_to_cid[topic_name] = cid
+                logger.info(f"话题「{topic_name}」-> containerid: {cid}")
+            else:
+                logger.warning(
+                    f"未找到话题「{topic_name}」的 containerid，将发布到个人主页"
+                )
+            # 搜索间隔，避免请求过快
+            if len(posting_topics) > 1:
+                time.sleep(1)
+
         try:
             # 初始化 AI Provider
             ai = create_provider_from_env()
-            post_result = run_posting(
-                client, ai, posting_topics, posting_style
+            post_results = run_posting(
+                client, ai, posting_topics, posting_style, topic_to_cid
             )
         except ValueError as e:
             logger.error(f"AI Provider 初始化失败: {e}")
@@ -286,17 +395,25 @@ def main():
     logger.info("执行汇总")
     logger.info("=" * 50)
 
+    # 清理 Playwright 浏览器资源
+    client.cleanup()
+
     for r in checkin_results:
         logger.info(f"签到: {r.get('name', '?')} -> {r['message']}")
 
-    if post_result:
-        logger.info(f"发帖: {post_result['message']}")
-        if post_result.get("content"):
-            preview = post_result["content"][:80].replace("\n", " ")
-            logger.info(f"内容预览: {preview}...")
+    for pr in post_results:
+        logger.info(
+            f"发帖 [{pr.get('topic', '?')}]: {pr.get('message', '?')}"
+        )
+        if pr.get("content"):
+            preview = pr["content"][:80].replace("\n", " ")
+            logger.info(f"  内容预览: {preview}...")
 
     all_success = all(r["success"] for r in checkin_results)
-    post_success = post_result and post_result.get("success", False)
+    post_success = (
+        len(post_results) > 0
+        and all(pr.get("success") for pr in post_results)
+    )
 
     logger.info("=" * 50)
     if checkin_results:
@@ -304,8 +421,12 @@ def main():
             f"签到: {sum(1 for r in checkin_results if r['success'])}"
             f"/{len(checkin_results)} 成功"
         )
-    if post_result:
-        logger.info(f"发帖: {'成功 ✅' if post_success else '失败 ❌'}")
+    if post_results:
+        success_count = sum(1 for pr in post_results if pr.get("success"))
+        logger.info(
+            f"发帖: {success_count}/{len(post_results)} 成功"
+            f"{' ✅' if post_success else ' ❌'}"
+        )
     logger.info("=" * 50)
 
     # ---- 6. 发送通知 ----
@@ -321,7 +442,7 @@ def main():
             notifier = create_notifier_from_env()
             if notifier:
                 title, content = build_notification(
-                    checkin_results, post_result
+                    checkin_results, post_results
                 )
                 if notifier.send(title, content):
                     logger.info("通知已发送")
@@ -333,7 +454,7 @@ def main():
             logger.error(f"通知模块异常，不影响主流程: {e}")
 
     # 如果有任何失败，返回非零退出码（GitHub Actions 会标记为失败）
-    if not all_success or (post_result and not post_success):
+    if not all_success or (post_results and not post_success):
         sys.exit(1)
 
 

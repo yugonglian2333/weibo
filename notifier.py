@@ -282,14 +282,14 @@ def create_notifier_from_env() -> Optional[Notifier]:
 
 def build_notification(
     checkin_results: list[dict],
-    post_result: Optional[dict],
+    post_results: Optional[list[dict]] = None,
 ) -> tuple[str, str]:
     """
     根据签到和发帖结果构建通知标题和内容
 
     Args:
         checkin_results: 签到结果列表
-        post_result: 发帖结果（可为 None）
+        post_results: 发帖结果列表（可为 None 或空列表）
 
     Returns:
         (title, content) 元组
@@ -317,30 +317,48 @@ def build_notification(
     else:
         lines.append("📭 签到: 未配置")
 
-    # 发帖汇总
-    if post_result:
-        if post_result.get("success"):
-            lines.append(f"📝 发帖: 成功 ✅")
-            content_preview = post_result.get("content", "")
-            if content_preview:
-                preview = content_preview[:60].replace("\n", " ")
-                preview = preview + ("..." if len(content_preview) > 60 else "")
-                lines.append(f"  内容: {preview}")
-        else:
-            lines.append(f"📝 发帖: 失败 ❌")
-            err = post_result.get("message", "")
-            if err:
-                lines.append(f"  原因: {err}")
+    # 发帖汇总（支持多条）
+    if post_results:
+        total = len(post_results)
+        success = sum(1 for r in post_results if r.get("success"))
+        emoji = "✅" if success == total else "⚠️"
+        lines.append(f"{emoji} AI 发帖: {success}/{total} 成功")
+        for pr in post_results:
+            topic = pr.get("topic", "未知话题")
+            if pr.get("success"):
+                wid = pr.get("weibo_id", "?")
+                lines.append(f"  • {topic} ✅ 已发布 (ID: {wid})")
+                content_preview = pr.get("content", "")
+                if content_preview:
+                    preview = content_preview[:60].replace("\n", " ")
+                    preview = (
+                        preview + "..."
+                        if len(content_preview) > 60
+                        else preview
+                    )
+                    lines.append(f"    {preview}")
+            else:
+                msg = pr.get("message", "失败")
+                lines.append(f"  • {topic} ❌ {msg}")
     else:
         lines.append("📝 发帖: 未开启或未配置")
 
     lines.append("━━━━━━━━━━━━━━")
 
-    # 标题用签到成功率
-    title = "微博签到完成"
+    # 标题：结合签到和发帖状态
+    title_parts = []
     if checkin_results:
-        success = sum(1 for r in checkin_results if r["success"])
-        total = len(checkin_results)
-        title = f"微博签到完成 ({success}/{total})"
+        s = sum(1 for r in checkin_results if r["success"])
+        t = len(checkin_results)
+        title_parts.append(f"签到({s}/{t})")
+    if post_results:
+        s = sum(1 for r in post_results if r.get("success"))
+        t = len(post_results)
+        title_parts.append(f"发帖({s}/{t})")
+
+    if title_parts:
+        title = "微博 " + "，".join(title_parts)
+    else:
+        title = "微博执行完成"
 
     return title, "\n".join(lines)

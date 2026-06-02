@@ -70,75 +70,176 @@ class MimoProvider(AIProvider):
         topics: list[str],
         style: str = "自然随性",
     ) -> str:
-        """调用 Mimo API 生成微博帖子"""
+        """调用 Mimo API 生成微博帖子（自动识别 OpenAI / Anthropic 协议）"""
         topic_str = "、".join(topics)
         system_prompt = (
-            f"你是一个微博用户，经常参与超话讨论。"
-            f"你的发言风格：{style}。"
-            f"请生成一条原创微博，围绕以下超话话题：{topic_str}。"
+            f"你是一个普通微博用户，喜欢分享日常生活、追星感受和正能量内容。"
+            f"你的发言风格：{style}。\n"
+            f"请围绕以下超话话题生成一条原创微博：{topic_str}。\n"
             f"要求：\n"
             f"1. 字数在 50-200 字之间\n"
-            f"2. 内容有趣、有观点，避免空洞无物\n"
-            f"3. 适当使用微博常用表达（如 emoji、话题标签 #）\n"
-            f"4. 不要在回复中包含任何前缀说明，直接输出微博正文\n"
-            f"5. 每次生成的内容要有所区别，避免重复"
+            f"2. 内容风格正面积极，重点表达对该话题/人物的喜爱、赞美、鼓励或分享有趣见闻\n"
+            f"3. 用 personal 的语气（如「今天刷到」「真的好喜欢」），增加真实感和亲切感\n"
+            f"4. 适当使用 emoji（1-3 个即可）\n"
+            f"5. 每次生成的内容要有所区别，避免重复\n"
+            f"\n"
+            f"【话题标签格式】：\n"
+            f"- 微博超话的标签格式为 #话题名[超话]#（方括号内是「超话」二字，这是进入超话内部发帖的关键）\n"
+            f"- 示例：如果话题是「鞠婧祎」，标签应写为 #鞠婧祎[超话]# 而不是 #鞠婧祎#\n"
+            f"- 必须使用正确的 #[超话]# 格式，否则帖子不会出现在超话内部\n"
+            f"\n"
+            f"【严格禁止】：\n"
+            f"- 绝对禁止将不同明星或艺人放在一起比较（如「A比B好看」「A不如B」）\n"
+            f"- 绝对禁止发表任何可能引发粉丝争吵、对立、拉踩的言论\n"
+            f"- 绝对禁止使用贬低性、攻击性语言评价任何人物\n"
+            f"- 绝对禁止讨论敏感话题（政治、宗教、社会争议等）\n"
+            f"- 内容应体现对该话题对象的单纯喜爱和支持，不拉踩、不引战\n"
+            f"\n"
+            f"【输出格式】：直接输出微博正文，不要在回复中包含任何前缀说明"
         )
 
-        try:
-            resp = requests.post(
-                f"{self.api_base}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
+        # 根据 API Base URL 自动识别协议类型
+        # https://.../anthropic  → Anthropic 协议
+        # https://.../v1         → OpenAI 协议
+        is_anthropic = self.api_base.endswith("/anthropic")
+
+        # 构建两种协议的请求配置（404 时自动切换）
+        protocols = []
+        if is_anthropic:
+            # 优先 Anthropic 协议，备选 OpenAI 协议（去掉 /anthropic 后缀加 /v1）
+            protocols.append({
+                "name": "Anthropic",
+                "url": f"{self.api_base}/messages",
+                "payload": {
+                    "model": self.model,
+                    "max_tokens": 4096,
+                    "temperature": 0.9,
+                    "system": system_prompt,
+                    "messages": [
+                        {"role": "user", "content": "请生成一条微博帖子"},
+                    ],
                 },
-                json={
+                "is_anthropic": True,
+            })
+            # 备选: 把 /anthropic 替换为 /v1，走 OpenAI 协议
+            openai_base = self.api_base.replace("/anthropic", "/v1")
+            protocols.append({
+                "name": "OpenAI(备选)",
+                "url": f"{openai_base}/chat/completions",
+                "payload": {
                     "model": self.model,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": "请生成一条微博帖子"},
                     ],
                     "temperature": 0.9,
-                    "max_tokens": 500,
+                    "max_tokens": 4096,
                 },
-                timeout=60,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+                "is_anthropic": False,
+            })
+        else:
+            protocols.append({
+                "name": "OpenAI",
+                "url": f"{self.api_base}/chat/completions",
+                "payload": {
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": "请生成一条微博帖子"},
+                    ],
+                    "temperature": 0.9,
+                    "max_tokens": 4096,
+                },
+                "is_anthropic": False,
+            })
 
-            content = (
-                data.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-                .strip()
-            )
-
-            if content:
-                logger.info(
-                    f"Mimo 生成内容成功，长度: {len(content)} 字"
+        # 依次尝试每种协议（遇到 404 自动切换备选）
+        last_error = None
+        for proto in protocols:
+            logger.info(f"尝试 {proto['name']} 协议: {proto['url']}")
+            try:
+                resp = requests.post(
+                    proto["url"],
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=proto["payload"],
+                    timeout=60,
                 )
-                return content
-            else:
-                logger.warning("Mimo 返回内容为空")
-                return ""
+                resp.raise_for_status()
+                data = resp.json()
 
-        except requests.RequestException as e:
-            status = getattr(e.response, 'status_code', 'N/A') if hasattr(e, 'response') and e.response else 'N/A'
-            logger.error(
-                f"Mimo API 请求失败: {e} | status={status}"
-            )
-            if status == 404:
-                logger.error(
-                    "Mimo API 返回 404，可能原因："
-                    "1) API 地址不正确（当前: %s）"
-                    "2) Mimo 服务已下线或变更 "
-                    "3) 请检查 AI_API_BASE 环境变量，"
-                    "或切换到其他 Provider（设置 AI_PROVIDER=openai）",
-                    self.api_base,
-                )
-            return ""
-        except (KeyError, IndexError, ValueError) as e:
-            logger.error(f"Mimo 响应解析失败: {e}")
-            return ""
+                # 解析响应
+                if proto["is_anthropic"]:
+                    content = (
+                        data.get("content", [{}])[0]
+                        .get("text", "")
+                        .strip()
+                    )
+                else:
+                    content = (
+                        data.get("choices", [{}])[0]
+                        .get("message", {})
+                        .get("content", "")
+                        .strip()
+                    )
+
+                if content:
+                    logger.info(
+                        f"Mimo ({proto['name']}) 生成内容成功，长度: {len(content)} 字"
+                    )
+                    return content
+                else:
+                    # 推理模型（如 DeepSeek-R1）可能把内容放在 reasoning_content 里
+                    msg = data.get("choices", [{}])[0].get("message", {})
+                    reasoning = msg.get("reasoning_content", "")
+                    if reasoning:
+                        logger.info(
+                            f"Mimo ({proto['name']}) 从 reasoning_content 提取内容，"
+                            f"长度: {len(reasoning)} 字"
+                        )
+                        return reasoning.strip()
+                    # 内容为空，打印响应结构帮助排查
+                    logger.warning(
+                        f"Mimo ({proto['name']}) 返回内容为空，"
+                        f"响应结构: {str(data)[:500]}"
+                    )
+                    return ""
+
+            except requests.RequestException as e:
+                last_error = e
+                # 获取 HTTP 状态码
+                status = None
+                try:
+                    if e.response is not None:
+                        status = e.response.status_code
+                except Exception:
+                    pass
+
+                if status == 404:
+                    logger.warning(
+                        f"{proto['name']} 协议 404，URL 不可用，尝试下一个..."
+                    )
+                    continue
+                else:
+                    # 非 404 错误（如 401, 500 等）不重试
+                    break
+
+        # 所有协议都失败
+        status_msg = ""
+        if last_error is not None:
+            try:
+                if last_error.response is not None:
+                    status_msg = f" | status={last_error.response.status_code}"
+            except Exception:
+                pass
+        logger.error(f"Mimo API 请求失败: {last_error}{status_msg}")
+        if status_msg and "401" in status_msg:
+            logger.error("Mimo API Key 无效（401），请检查 AI_API_KEY 环境变量")
+        elif status_msg and "404" in status_msg:
+            logger.error("所有协议均返回 404，请检查 AI_API_BASE 是否正确")
+        return ""
 
 
 class ClaudeProvider(AIProvider):
@@ -173,12 +274,29 @@ class ClaudeProvider(AIProvider):
                 max_tokens=500,
                 temperature=0.9,
                 system=(
-                    f"你是一个微博用户，经常参与超话讨论。"
-                    f"你的发言风格：{style}。"
-                    f"请生成原创的微博帖子。"
-                    f"要求：字数50-200字，内容有趣有观点，"
-                    f"适当使用 emoji 和话题标签，"
-                    f"直接输出微博正文不要前缀说明"
+                    f"你是一个普通微博用户，喜欢分享日常生活、追星感受和正能量内容。"
+                    f"你的发言风格：{style}。\n"
+                    f"请围绕以下超话话题生成一条原创微博：{topic_str}。\n"
+                    f"要求：\n"
+                    f"1. 字数在 50-200 字之间\n"
+                    f"2. 内容风格正面积极，重点表达对该话题/人物的喜爱、赞美、鼓励或分享有趣见闻\n"
+                    f"3. 用 personal 的语气（如「今天刷到」「真的好喜欢」），增加真实感和亲切感\n"
+                    f"4. 适当使用 emoji（1-3 个即可）\n"
+                    f"5. 每次生成的内容要有所区别，避免重复\n"
+                    f"\n"
+                    f"【话题标签格式】：\n"
+                    f"- 微博超话的标签格式为 #话题名[超话]#（方括号内是「超话」二字，这是进入超话内部发帖的关键）\n"
+                    f"- 示例：如果话题是「鞠婧祎」，标签应写为 #鞠婧祎[超话]# 而不是 #鞠婧祎#\n"
+                    f"- 必须使用正确的 #[超话]# 格式，否则帖子不会出现在超话内部\n"
+                    f"\n"
+                    f"【严格禁止】：\n"
+                    f"- 绝对禁止将不同明星或艺人放在一起比较（如「A比B好看」「A不如B」）\n"
+                    f"- 绝对禁止发表任何可能引发粉丝争吵、对立、拉踩的言论\n"
+                    f"- 绝对禁止使用贬低性、攻击性语言评价任何人物\n"
+                    f"- 绝对禁止讨论敏感话题（政治、宗教、社会争议等）\n"
+                    f"- 内容应体现对该话题对象的单纯喜爱和支持，不拉踩、不引战\n"
+                    f"\n"
+                    f"【输出格式】：直接输出微博正文，不要在回复中包含任何前缀说明"
                 ),
                 messages=[
                     {
@@ -247,9 +365,29 @@ class OpenAIProvider(AIProvider):
                         {
                             "role": "system",
                             "content": (
-                                f"你是微博用户，发言风格：{style}。"
-                                f"生成原创微博，50-200字，有趣有观点，"
-                                f"用 emoji 和话题标签，直接输出正文。"
+                                f"你是一个普通微博用户，喜欢分享日常生活、追星感受和正能量内容。"
+                                f"你的发言风格：{style}。\n"
+                                f"请围绕以下超话话题生成一条原创微博：{topic_str}。\n"
+                                f"要求：\n"
+                                f"1. 字数在 50-200 字之间\n"
+                                f"2. 内容风格正面积极，重点表达对该话题/人物的喜爱、赞美、鼓励或分享有趣见闻\n"
+                                f"3. 用 personal 的语气（如「今天刷到」「真的好喜欢」），增加真实感和亲切感\n"
+                                f"4. 适当使用 emoji（1-3 个即可）\n"
+                                f"5. 每次生成的内容要有所区别，避免重复\n"
+                                f"\n"
+                                f"【话题标签格式】：\n"
+                                f"- 微博超话的标签格式为 #话题名[超话]#（方括号内是「超话」二字，这是进入超话内部发帖的关键）\n"
+                                f"- 示例：如果话题是「鞠婧祎」，标签应写为 #鞠婧祎[超话]# 而不是 #鞠婧祎#\n"
+                                f"- 必须使用正确的 #[超话]# 格式，否则帖子不会出现在超话内部\n"
+                                f"\n"
+                                f"【严格禁止】：\n"
+                                f"- 绝对禁止将不同明星或艺人放在一起比较（如「A比B好看」「A不如B」）\n"
+                                f"- 绝对禁止发表任何可能引发粉丝争吵、对立、拉踩的言论\n"
+                                f"- 绝对禁止使用贬低性、攻击性语言评价任何人物\n"
+                                f"- 绝对禁止讨论敏感话题（政治、宗教、社会争议等）\n"
+                                f"- 内容应体现对该话题对象的单纯喜爱和支持，不拉踩、不引战\n"
+                                f"\n"
+                                f"【输出格式】：直接输出微博正文，不要在回复中包含任何前缀说明"
                             ),
                         },
                         {
@@ -258,7 +396,7 @@ class OpenAIProvider(AIProvider):
                         },
                     ],
                     "temperature": 0.9,
-                    "max_tokens": 500,
+                    "max_tokens": 4096,
                 },
                 timeout=60,
             )
