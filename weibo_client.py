@@ -35,7 +35,15 @@ class WeiboClient:
         """配置请求会话，设置 Cookie 和通用请求头"""
         cookie_dict = self._parse_cookie_string(self.cookie)
         logger.info(f"解析到 {len(cookie_dict)} 个 Cookie 字段: {list(cookie_dict.keys())}")
-        self.session.cookies.update(cookie_dict)
+
+        # 显式设置 Cookie 域名，同时覆盖 .weibo.cn 和 .weibo.com
+        # 这样无论 Cookie 来自 PC 端还是移动端都能正常工作
+        for key, value in cookie_dict.items():
+            self.session.cookies.set(key, value, domain=".weibo.cn", path="/")
+            self.session.cookies.set(key, value, domain=".weibo.com", path="/")
+            self.session.cookies.set(key, value, domain="m.weibo.cn", path="/")
+            self.session.cookies.set(key, value, domain="weibo.com", path="/")
+
         self.session.headers.update({
             "User-Agent": (
                 "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) "
@@ -100,7 +108,16 @@ class WeiboClient:
             logger.error(f"请求失败 [{method} {url}]: {e}")
             return None
         except ValueError as e:
-            logger.error(f"JSON 解析失败 [{method} {url}]: {e}")
+            # 尝试获取响应文本的前 500 字符用于调试
+            try:
+                raw_preview = resp.text[:500] if hasattr(resp, 'text') else 'N/A'
+            except Exception:
+                raw_preview = 'N/A'
+            logger.error(
+                f"JSON 解析失败 [{method} {url}]: {e}"
+                f" | status={resp.status_code}"
+                f" | 响应预览: {raw_preview}"
+            )
             return None
 
     def check_session_valid(self) -> bool:
@@ -110,27 +127,55 @@ class WeiboClient:
         Returns:
             True 表示登录态有效
         """
+        # 方式一：m.weibo.cn 移动端 API
         url = f"{self.API_BASE}/config"
         data = self._request("GET", url)
-        if data is None:
-            logger.error("请求 /api/config 失败，无法确认登录态")
-            return False
-
-        # 打印完整响应用于调试
         logger.info(f"/api/config 响应: {data}")
 
-        # 如果返回了用户信息，说明已登录
-        if data.get("data", {}).get("login"):
+        if data and data.get("data", {}).get("login"):
             uid = data.get("data", {}).get("uid", "未知")
-            logger.info(f"Cookie 有效，当前登录用户 UID: {uid}")
+            logger.info(f"Cookie 有效（移动端），当前登录用户 UID: {uid}")
             return True
 
-        logger.warning("Cookie 已过期或无效，请重新获取")
-        logger.warning(
-            f"响应详情 — ok={data.get('ok')}, "
-            f"login={data.get('data', {}).get('login')}, "
-            f"msg={data.get('msg', '无')}"
+        # 方式二：weibo.com PC 端 API（兼容从 PC 端获取的 Cookie）
+        logger.info("移动端验证未通过，尝试 PC 端 API...")
+        pc_url = "https://weibo.com/ajax/config"
+        pc_data = self._request("GET", pc_url)
+        logger.info(f"weibo.com/ajax/config 响应: {pc_data}")
+
+        if pc_data and pc_data.get("data", {}).get("login"):
+            uid = pc_data.get("data", {}).get("uid", "未知")
+            logger.info(f"Cookie 有效（PC 端），当前登录用户 UID: {uid}")
+            return True
+
+        # 方式三：直接访问首页，看是否能获取到用户信息
+        logger.info("PC 端 API 也未通过，尝试获取首页...")
+        home_url = "https://m.weibo.cn/home"
+        home_resp = self.session.get(
+            home_url,
+            timeout=30,
+            allow_redirects=False,
         )
+        logger.info(f"/home 状态码: {home_resp.status_code}")
+        # 如果返回 200 且没有跳转到登录页，说明已登录
+        if home_resp.status_code == 200:
+            # 尝试从页面中提取 uid
+            import re
+            uid_match = re.search(
+                r'"uid":\s*"?(\d+)"?', home_resp.text
+            )
+            if uid_match:
+                uid = uid_match.group(1)
+                logger.info(
+                    f"Cookie 有效（首页验证），当前登录用户 UID: {uid}"
+                )
+                return True
+            # 如果没有跳转到登录页，就认为有效
+            if "passport" not in home_resp.url:
+                logger.info("Cookie 似乎有效（首页可访问，无登录跳转）")
+                return True
+
+        logger.warning("所有验证方式均失败，Cookie 可能已过期或无效")
         return False
 
     def get_containerid_by_name(self, name: str) -> Optional[str]:
@@ -243,27 +288,27 @@ class WeiboClient:
 
         data = self._request("GET", checkin_url, headers=headers)
 
-        if data is None:
-            result["message"] = f"签到请求失败 ({topic_name})"
-            return result
+        if data is not None:
+            # 解析签到结果
+            code = data.get("code", "")
+            msg = data.get("msg", "")
 
-        # 解析签到结果
-        code = data.get("code", "")
-        msg = data.get("msg", "")
-
-        if code == "100000":
-            # 签到成功
-            result["success"] = True
-            result["message"] = f"✅ {topic_name} 签到成功: {msg}"
-            logger.info(result["message"])
-        elif "已签到" in msg or "already" in msg.lower():
-            # 今天已经签到过了
-            result["success"] = True
-            result["message"] = f"⏭ {topic_name} 今日已签到: {msg}"
-            logger.info(result["message"])
+            if code == "100000":
+                # 签到成功
+                result["success"] = True
+                result["message"] = f"✅ {topic_name} 签到成功: {msg}"
+                logger.info(result["message"])
+            elif "已签到" in msg or "already" in msg.lower():
+                # 今天已经签到过了
+                result["success"] = True
+                result["message"] = f"⏭ {topic_name} 今日已签到: {msg}"
+                logger.info(result["message"])
+            else:
+                result["message"] = f"❌ {topic_name} 签到失败: {msg} (code={code})"
+                logger.warning(result["message"])
         else:
-            result["message"] = f"❌ {topic_name} 签到失败: {msg} (code={code})"
-            logger.warning(result["message"])
+            # 主接口请求失败（非 JSON 响应或网络错误），记录并尝试备选方案
+            logger.warning(f"主签到接口请求失败 ({topic_name})，尝试移动端备选方案...")
 
         # 也尝试移动端 API 作为备选
         if not result["success"]:

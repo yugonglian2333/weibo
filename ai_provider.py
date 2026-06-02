@@ -122,7 +122,19 @@ class MimoProvider(AIProvider):
                 return ""
 
         except requests.RequestException as e:
-            logger.error(f"Mimo API 请求失败: {e}")
+            status = getattr(e.response, 'status_code', 'N/A') if hasattr(e, 'response') and e.response else 'N/A'
+            logger.error(
+                f"Mimo API 请求失败: {e} | status={status}"
+            )
+            if status == 404:
+                logger.error(
+                    "Mimo API 返回 404，可能原因："
+                    "1) API 地址不正确（当前: %s）"
+                    "2) Mimo 服务已下线或变更 "
+                    "3) 请检查 AI_API_BASE 环境变量，"
+                    "或切换到其他 Provider（设置 AI_PROVIDER=openai）",
+                    self.api_base,
+                )
             return ""
         except (KeyError, IndexError, ValueError) as e:
             logger.error(f"Mimo 响应解析失败: {e}")
@@ -270,7 +282,17 @@ class OpenAIProvider(AIProvider):
                 return ""
 
         except requests.RequestException as e:
-            logger.error(f"OpenAI API 请求失败: {e}")
+            status = getattr(e.response, 'status_code', 'N/A') if hasattr(e, 'response') and e.response else 'N/A'
+            logger.error(f"OpenAI API 请求失败: {e} | status={status}")
+            if status == 404:
+                logger.error(
+                    "API 返回 404，请检查 AI_API_BASE 是否正确（当前: %s）",
+                    self.api_base,
+                )
+            elif status == 401:
+                logger.error(
+                    "API Key 无效（401），请检查 AI_API_KEY 环境变量"
+                )
             return ""
         except (KeyError, IndexError, ValueError) as e:
             logger.error(f"OpenAI 响应解析失败: {e}")
