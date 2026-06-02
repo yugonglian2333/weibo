@@ -443,6 +443,18 @@ class WeiboClient:
                             browser.close()
                             return cid
 
+                        # 反向包含：候选名称是搜索词的子串
+                        # 例: 搜索"鞠婧祎阿黛" → 候选"鞠婧祎" in 搜索词 ✓
+                        if topic_name_clean and topic_name_clean in search_name_clean:
+                            logger.info(
+                                f"反向匹配: 「{topic_name_clean}」"
+                                f" 在搜索词「{search_name_clean}」中"
+                                f" -> containerid: {cid}"
+                            )
+                            page.close()
+                            browser.close()
+                            return cid
+
                         # 模糊匹配：记录最佳候选项
                         if search_name_clean in topic_name_clean:
                             extra = topic_name_clean.replace(
@@ -484,6 +496,25 @@ class WeiboClient:
                     logger.info(
                         f"使用最佳模糊匹配: 「{topic_name_clean}」"
                         f" -> containerid: {cid}"
+                    )
+                    page.close()
+                    browser.close()
+                    return cid
+
+                # 兜底：没有任何匹配规则命中，但候选存在
+                # 如果只有 1 个候选 或 最高频候选频率远超其他，直接返回
+                if len(sorted_candidates) == 1:
+                    cid = sorted_candidates[0][0]
+                    logger.info(f"唯一候选，直接使用: containerid={cid}")
+                    page.close()
+                    browser.close()
+                    return cid
+                if (len(sorted_candidates) >= 1
+                        and sorted_candidates[0][1] > sorted_candidates[1][1] * 5):
+                    cid = sorted_candidates[0][0]
+                    logger.info(
+                        f"最高频候选远超其他（{sorted_candidates[0][1]} vs "
+                        f"{sorted_candidates[1][1]}），直接使用: containerid={cid}"
                     )
                     page.close()
                     browser.close()
@@ -585,6 +616,30 @@ class WeiboClient:
             [{"id": str, "mid": str, "text": str, "user": str}, ...]
             其中 text 已去除 HTML 标签，mid 用于评论 API
         """
+
+        # 检测 Cookie 类型：PC 端 Cookie 无法通过移动端 API 获取帖子
+        cookie_dict = self._parse_cookie_string(self.cookie)
+        has_pc_cookie = bool(
+            cookie_dict.get("PC_TOKEN") or cookie_dict.get("_s_tentry")
+        )
+
+        # PC 端 Cookie → 优先使用 Playwright 浏览器获取帖子
+        if has_pc_cookie:
+            logger.info("PC 端 Cookie，使用 Playwright 获取超话帖子...")
+            pw_posts = self._get_super_topic_posts_with_playwright(
+                containerid, count
+            )
+            if pw_posts:
+                logger.info(
+                    f"PC 端获取到 {len(pw_posts)} 条帖子 "
+                    f"(containerid={containerid})"
+                )
+                return pw_posts
+            logger.warning(
+                "PC 端获取帖子失败，尝试移动端 API..."
+            )
+
+        # 移动端 Cookie 或 PC 端回退 → 移动端 API
         url = f"{self.API_BASE}/container/getIndex"
         params = {"containerid": containerid, "page": 1}
         data = self._request("GET", url, params=params)
@@ -634,6 +689,190 @@ class WeiboClient:
 
         logger.info(
             f"获取到 {len(posts)} 条帖子 (containerid={containerid})"
+        )
+        return posts
+
+    def _get_super_topic_posts_with_playwright(
+        self, containerid: str, count: int = 3
+    ) -> list[dict]:
+        """
+        使用 Playwright 浏览器在 PC 端获取超话帖子列表
+
+        通过导航到超话页面，从页面内嵌 JS 数据 / AJAX API / DOM 三种方案
+        逐级回退提取帖子信息（mid、文本、用户名）。
+        """
+        posts = []
+
+        context = self._get_pw_context()
+        if context is None:
+            logger.warning("Playwright 未安装，无法获取超话帖子")
+            return posts
+
+        page = context.new_page()
+
+        try:
+            topic_url = (
+                f"https://weibo.com/p/{containerid}/super_index"
+            )
+            page.goto(
+                topic_url,
+                wait_until="domcontentloaded",
+                timeout=30000,
+            )
+            page.wait_for_timeout(3000)
+
+            import json as _json
+
+            # — 方案 1: 从 window.__INITIAL_STATE__ 提取帖子 —
+            feed_data = page.evaluate("""() => {
+                if (window.__INITIAL_STATE__) {
+                    try {
+                        var state = window.__INITIAL_STATE__;
+                        for (var key in state) {
+                            if (!state.hasOwnProperty(key)) continue;
+                            var v = state[key];
+                            if (v && v.statuses && Array.isArray(v.statuses)) {
+                                return v.statuses;
+                            }
+                            if (v && v.feeds && Array.isArray(v.feeds)) {
+                                return v.feeds;
+                            }
+                            if (v && v.cards && Array.isArray(v.cards)) {
+                                return v.cards;
+                            }
+                        }
+                    } catch(e) {}
+                }
+                return null;
+            }""")
+
+            if feed_data and isinstance(feed_data, list):
+                for item in feed_data:
+                    if not isinstance(item, dict):
+                        continue
+                    mblog = item.get("mblog") or item
+                    post_id = mblog.get("id", "")
+                    mid = mblog.get("mid", "")
+                    text_raw = mblog.get("text", "") or mblog.get(
+                        "text_raw", ""
+                    )
+                    user = mblog.get("user", {})
+                    user_name = (
+                        user.get("screen_name", "")
+                        if isinstance(user, dict)
+                        else ""
+                    )
+
+                    if mid and post_id:
+                        text_clean = re.sub(
+                            r"<[^>]*>", "", text_raw
+                        ).strip()[:200]
+                        posts.append({
+                            "id": post_id,
+                            "mid": mid,
+                            "text": text_clean,
+                            "user": user_name,
+                        })
+                        if len(posts) >= count:
+                            break
+
+            # — 方案 2: 用 page.request 调 PC 端 AJAX API —
+            if not posts:
+                logger.info(
+                    "页面 JS 状态提取失败，尝试 PC 端 AJAX API..."
+                )
+                try:
+                    feed_api = (
+                        "https://weibo.com/ajax/statuses/topicFeed"
+                    )
+                    api_resp = page.request.get(
+                        feed_api,
+                        params={
+                            "containerid": containerid,
+                            "page": 1,
+                        },
+                        headers={
+                            "X-Requested-With": "XMLHttpRequest",
+                            "Accept": (
+                                "application/json, "
+                                "text/plain, */*"
+                            ),
+                            "Referer": topic_url,
+                        },
+                    )
+
+                    if api_resp.status == 200:
+                        try:
+                            data = _json.loads(api_resp.text())
+                        except Exception:
+                            data = None
+
+                        if data and data.get("ok") == 1:
+                            statuses = (
+                                data.get("data", {})
+                                .get("statuses", [])
+                            )
+                            for s in statuses:
+                                text_raw = s.get(
+                                    "text_raw", ""
+                                ) or s.get("text", "")
+                                text_clean = re.sub(
+                                    r"<[^>]*>", "", text_raw
+                                ).strip()[:200]
+                                posts.append({
+                                    "id": s.get("id", ""),
+                                    "mid": s.get("mid", ""),
+                                    "text": text_clean,
+                                    "user": s.get(
+                                        "user", {}
+                                    ).get("screen_name", ""),
+                                })
+                                if len(posts) >= count:
+                                    break
+                        else:
+                            logger.info(
+                                "topicFeed API: "
+                                f"ok={data.get('ok') if data else 'N/A'}"
+                            )
+                except Exception as e:
+                    logger.warning(f"PC 端 AJAX API 失败: {e}")
+
+            # — 方案 3: 从页面 DOM 中抓取带 mid 属性的元素 —
+            if not posts:
+                logger.info("从 DOM 提取帖子 mid...")
+                dom_posts = page.evaluate("""() => {
+                    var results = [];
+                    var elements = document.querySelectorAll('[mid]');
+                    var seen = {};
+                    for (var i = 0; i < elements.length; i++) {
+                        var el = elements[i];
+                        var mid = el.getAttribute('mid');
+                        if (mid && !seen[mid] && /^\\d{10,}$/.test(mid)) {
+                            seen[mid] = true;
+                            var text = (el.textContent || '')
+                                .trim().substring(0, 200);
+                            results.push({mid: mid, text: text});
+                        }
+                        if (results.length >= 10) break;
+                    }
+                    return results;
+                }""")
+                for dp in dom_posts[:count]:
+                    posts.append({
+                        "id": dp.get("mid", ""),
+                        "mid": dp.get("mid", ""),
+                        "text": dp.get("text", ""),
+                        "user": "",
+                    })
+
+        except Exception as e:
+            logger.warning(f"Playwright 获取超话帖子异常: {e}")
+        finally:
+            page.close()
+
+        logger.info(
+            f"Playwright 获取到 {len(posts)} 条帖子 "
+            f"(containerid={containerid})"
         )
         return posts
 

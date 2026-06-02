@@ -297,6 +297,7 @@ def run_commenting(
     ai_provider,
     topics: list[dict],
     count: int = 3,
+    fixed_comment: str = "",
 ) -> list[dict]:
     """
     对超话下的前 N 个帖子进行自动评论
@@ -306,6 +307,7 @@ def run_commenting(
         ai_provider: AIProvider 实例（可为 None，此时只用模板评论）
         topics: 超话列表，如 [{"name": "xxx", "containerid": "100808xxx"}, ...]
         count: 每个超话评论的帖子数（默认 3）
+        fixed_comment: 固定评论内容。非空时直接使用此内容，跳过 AI 生成。
 
     Returns:
         评论结果列表
@@ -313,6 +315,9 @@ def run_commenting(
     if not topics:
         logger.info("没有需要评论的超话，跳过")
         return []
+
+    if fixed_comment:
+        logger.info(f"使用固定评论内容: 「{fixed_comment}」")
 
     logger.info(
         f"===== 自动评论开始（共 {len(topics)} 个超话，每个 {count} 条）====="
@@ -365,9 +370,13 @@ def run_commenting(
                 f"「{post_text[:40]}...」"
             )
 
-            # 2. 生成评论（AI 优先，失败则用模板）
+            # 2. 生成评论
             comment = ""
-            if ai_provider:
+            if fixed_comment:
+                # 有固定评论内容时直接使用
+                comment = fixed_comment
+                logger.info(f"   使用固定评论: 「{comment}」")
+            elif ai_provider:
                 try:
                     comment = ai_provider.generate_comment(
                         post_content=post_text, topic=name
@@ -379,9 +388,10 @@ def run_commenting(
                     comment = ""
 
             if not comment:
+                # 没有固定评论且 AI 未生成时，使用模板
                 comment = random.choice(FALLBACK_COMMENTS)
                 logger.info(f"   使用模板评论: 「{comment}」")
-            else:
+            elif not fixed_comment:
                 logger.info(f"   AI 生成评论: 「{comment}」")
 
             # 3. 发布评论
@@ -568,6 +578,10 @@ def main():
     commenting_config = config.get("commenting", {})
     commenting_enabled = commenting_config.get("enabled", True)
     commenting_count = commenting_config.get("count", 3)
+    # 固定评论内容：优先取 config，其次取环境变量 WEIBO_COMMENT_CONTENT
+    fixed_comment = commenting_config.get("fixed_comment", "")
+    if not fixed_comment:
+        fixed_comment = os.environ.get("WEIBO_COMMENT_CONTENT", "")
 
     comment_results = []
     if commenting_enabled and checkin_results:
@@ -581,22 +595,31 @@ def main():
             logger.info(
                 f"将为 {len(successful_topics)} 个签到成功的超话进行评论"
             )
-            try:
-                ai_for_comment = create_provider_from_env()
-                comment_results = run_commenting(
-                    client, ai_for_comment, successful_topics,
-                    count=commenting_count,
-                )
-            except ValueError as e:
-                logger.warning(
-                    f"AI Provider 初始化失败，使用模板评论: {e}"
-                )
+            # 有固定评论时不需要 AI
+            if fixed_comment:
+                logger.info(f"固定评论模式: 「{fixed_comment}」")
                 comment_results = run_commenting(
                     client, None, successful_topics,
                     count=commenting_count,
+                    fixed_comment=fixed_comment,
                 )
-            except Exception as e:
-                logger.error(f"自动评论异常: {e}")
+            else:
+                try:
+                    ai_for_comment = create_provider_from_env()
+                    comment_results = run_commenting(
+                        client, ai_for_comment, successful_topics,
+                        count=commenting_count,
+                    )
+                except ValueError as e:
+                    logger.warning(
+                        f"AI Provider 初始化失败，使用模板评论: {e}"
+                    )
+                    comment_results = run_commenting(
+                        client, None, successful_topics,
+                        count=commenting_count,
+                    )
+                except Exception as e:
+                    logger.error(f"自动评论异常: {e}")
         else:
             logger.info("没有签到成功的超话，跳过评论")
     elif not commenting_enabled:

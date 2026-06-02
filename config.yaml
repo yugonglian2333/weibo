@@ -6,6 +6,16 @@ checkin:
     containerid: 1008087adb46ea03ecbf42e7dda55bd56415d6
   - name: 万花世界
     containerid: 10080863220c0b00489deb171fc85e532f97da
+  - name: 鞠婧祎阿黛
+    containerid: 10080861a1581db3644f9d4b7c716debfc9545
+  - name: 来战
+    containerid: 1008083acb20688d15f146ba45290de6cd6842
+  - name: 鞠婧祎苏绿夏
+    containerid: 100808d282fa8a4f69dbd313ba68db6d0c0fcb
+commenting:
+  enabled: true
+  count: 3
+  fixed_comment: 鞠婧祎
 posting:
   enabled: true
   topics:
