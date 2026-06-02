@@ -696,10 +696,13 @@ class WeiboClient:
         self, containerid: str, count: int = 3
     ) -> list[dict]:
         """
-        使用 Playwright 浏览器在 PC 端获取超话帖子列表
+        使用 Playwright 浏览器获取超话帖子列表
 
-        通过导航到超话页面，从页面内嵌 JS 数据 / AJAX API / DOM 三种方案
-        逐级回退提取帖子信息（mid、文本、用户名）。
+        核心思路：requests 库调移动端 API 会被 Sina Visitor System 拦截，
+        但 Playwright 的 page.request（APIRequestContext）使用浏览器级
+        HTTP 栈（TLS 指纹 + Cookie 共享），可以绕过反爬，正常拿到 JSON。
+
+        先尝试 PC 端 AJAX API，失败则回退到移动端 m.weibo.cn API。
         """
         posts = []
 
@@ -711,141 +714,168 @@ class WeiboClient:
         page = context.new_page()
 
         try:
+            import json as _json
+
+            # — 方案 1: PC 端 AJAX API（最佳性能）—
+            logger.info("尝试 PC 端 AJAX API 获取帖子...")
             topic_url = (
                 f"https://weibo.com/p/{containerid}/super_index"
             )
-            page.goto(
-                topic_url,
-                wait_until="domcontentloaded",
-                timeout=30000,
+            feed_api = "https://weibo.com/ajax/statuses/topicFeed"
+            api_resp = page.request.get(
+                feed_api,
+                params={"containerid": containerid, "page": 1},
+                headers={
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Accept": "application/json, text/plain, */*",
+                    "Referer": topic_url,
+                },
             )
-            page.wait_for_timeout(3000)
 
-            import json as _json
+            if api_resp.status == 200:
+                try:
+                    data = _json.loads(api_resp.text())
+                except Exception:
+                    data = None
 
-            # — 方案 1: 从 window.__INITIAL_STATE__ 提取帖子 —
-            feed_data = page.evaluate("""() => {
-                if (window.__INITIAL_STATE__) {
-                    try {
-                        var state = window.__INITIAL_STATE__;
-                        for (var key in state) {
-                            if (!state.hasOwnProperty(key)) continue;
-                            var v = state[key];
-                            if (v && v.statuses && Array.isArray(v.statuses)) {
-                                return v.statuses;
-                            }
-                            if (v && v.feeds && Array.isArray(v.feeds)) {
-                                return v.feeds;
-                            }
-                            if (v && v.cards && Array.isArray(v.cards)) {
-                                return v.cards;
-                            }
-                        }
-                    } catch(e) {}
-                }
-                return null;
-            }""")
-
-            if feed_data and isinstance(feed_data, list):
-                for item in feed_data:
-                    if not isinstance(item, dict):
-                        continue
-                    mblog = item.get("mblog") or item
-                    post_id = mblog.get("id", "")
-                    mid = mblog.get("mid", "")
-                    text_raw = mblog.get("text", "") or mblog.get(
-                        "text_raw", ""
+                if data and data.get("ok") == 1:
+                    statuses = (
+                        data.get("data", {}).get("statuses", [])
                     )
-                    user = mblog.get("user", {})
-                    user_name = (
-                        user.get("screen_name", "")
-                        if isinstance(user, dict)
-                        else ""
-                    )
-
-                    if mid and post_id:
+                    for s in statuses:
+                        text_raw = s.get("text_raw", "") or s.get("text", "")
                         text_clean = re.sub(
                             r"<[^>]*>", "", text_raw
                         ).strip()[:200]
                         posts.append({
-                            "id": post_id,
-                            "mid": mid,
+                            "id": s.get("id", ""),
+                            "mid": s.get("mid", ""),
                             "text": text_clean,
-                            "user": user_name,
+                            "user": s.get("user", {}).get("screen_name", ""),
                         })
                         if len(posts) >= count:
                             break
+                    if posts:
+                        logger.info(
+                            f"PC 端 AJAX API 获取到 {len(posts)} 条帖子"
+                        )
+                else:
+                    ok_val = data.get("ok") if data else "N/A"
+                    logger.info(f"PC 端 AJAX API: ok={ok_val}")
+            else:
+                logger.info(
+                    f"PC 端 AJAX API: HTTP {api_resp.status}"
+                )
 
-            # — 方案 2: 用 page.request 调 PC 端 AJAX API —
+            # — 方案 2: Playwright 调移动端 API（绕过反爬的关键）—
             if not posts:
                 logger.info(
-                    "页面 JS 状态提取失败，尝试 PC 端 AJAX API..."
+                    "PC 端 API 失败，用 Playwright 调移动端 API..."
                 )
-                try:
-                    feed_api = (
-                        "https://weibo.com/ajax/statuses/topicFeed"
-                    )
-                    api_resp = page.request.get(
-                        feed_api,
-                        params={
-                            "containerid": containerid,
-                            "page": 1,
-                        },
-                        headers={
-                            "X-Requested-With": "XMLHttpRequest",
-                            "Accept": (
-                                "application/json, "
-                                "text/plain, */*"
-                            ),
-                            "Referer": topic_url,
-                        },
-                    )
+                mobile_url = (
+                    f"{self.API_BASE}/container/getIndex"
+                    f"?containerid={containerid}&page=1"
+                )
+                mobile_resp = page.request.get(
+                    mobile_url,
+                    headers={
+                        "X-Requested-With": "XMLHttpRequest",
+                        "Accept": "application/json, text/plain, */*",
+                        "Referer": "https://m.weibo.cn/",
+                        "User-Agent": (
+                            "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 "
+                            "like Mac OS X) AppleWebKit/605.1.15 "
+                            "(KHTML, like Gecko) Version/15.0 "
+                            "Mobile/15E148 Safari/604.1"
+                        ),
+                    },
+                )
 
-                    if api_resp.status == 200:
-                        try:
-                            data = _json.loads(api_resp.text())
-                        except Exception:
-                            data = None
+                if mobile_resp.status == 200:
+                    raw_text = mobile_resp.text()
+                    logger.info(
+                        f"移动端 API 响应: status={mobile_resp.status}, "
+                        f"len={len(raw_text)}, "
+                        f"preview={raw_text[:200]}"
+                    )
+                    try:
+                        data = _json.loads(raw_text)
+                    except Exception:
+                        logger.warning(
+                            f"移动端 API 返回非 JSON，"
+                            f"前200字符: {raw_text[:200]}"
+                        )
+                        data = None
 
-                        if data and data.get("ok") == 1:
-                            statuses = (
-                                data.get("data", {})
-                                .get("statuses", [])
-                            )
-                            for s in statuses:
-                                text_raw = s.get(
-                                    "text_raw", ""
-                                ) or s.get("text", "")
+                    if data and data.get("ok") == 1:
+                        cards = data.get("data", {}).get("cards", [])
+                        for card in cards:
+                            candidates = []
+                            card_type = card.get("card_type")
+                            if card_type in (9, 11, 0):
+                                candidates.append(card)
+                            for group in card.get("card_group", []):
+                                group_type = group.get("card_type")
+                                if group_type in (9, 11):
+                                    candidates.append(group)
+
+                            for c in candidates:
+                                mblog = c.get("mblog", {})
+                                if not mblog:
+                                    continue
+                                text_raw = mblog.get("text", "")
                                 text_clean = re.sub(
                                     r"<[^>]*>", "", text_raw
                                 ).strip()[:200]
                                 posts.append({
-                                    "id": s.get("id", ""),
-                                    "mid": s.get("mid", ""),
+                                    "id": mblog.get("id", ""),
+                                    "mid": mblog.get("mid", ""),
                                     "text": text_clean,
-                                    "user": s.get(
-                                        "user", {}
-                                    ).get("screen_name", ""),
+                                    "user": mblog.get("user", {}).get(
+                                        "screen_name", ""
+                                    ),
                                 })
                                 if len(posts) >= count:
                                     break
-                        else:
+                            if len(posts) >= count:
+                                break
+                        if posts:
                             logger.info(
-                                "topicFeed API: "
-                                f"ok={data.get('ok') if data else 'N/A'}"
+                                f"移动端 API 获取到 {len(posts)} 条帖子"
                             )
-                except Exception as e:
-                    logger.warning(f"PC 端 AJAX API 失败: {e}")
+                    else:
+                        ok_val = data.get("ok") if data else "N/A"
+                        logger.info(f"移动端 API: ok={ok_val}")
+                else:
+                    logger.info(
+                        f"移动端 API: HTTP {mobile_resp.status}"
+                    )
 
-            # — 方案 3: 从页面 DOM 中抓取带 mid 属性的元素 —
+            # — 方案 3: 导航到超话页面，从 DOM 提取 —
             if not posts:
-                logger.info("从 DOM 提取帖子 mid...")
+                logger.info(
+                    "API 方案均失败，导航到超话页面从 DOM 提取..."
+                )
+                page.goto(
+                    topic_url,
+                    wait_until="networkidle",
+                    timeout=30000,
+                )
+                page.wait_for_timeout(3000)
+
+                # 打印页面标题和 URL 用于调试
+                logger.info(
+                    f"超话页面: title={page.title()}, "
+                    f"url={page.url[:120]}"
+                )
+
                 dom_posts = page.evaluate("""() => {
                     var results = [];
-                    var elements = document.querySelectorAll('[mid]');
+                    // 遍历所有带 mid 属性的元素
+                    var all = document.querySelectorAll('[mid]');
                     var seen = {};
-                    for (var i = 0; i < elements.length; i++) {
-                        var el = elements[i];
+                    for (var i = 0; i < all.length; i++) {
+                        var el = all[i];
                         var mid = el.getAttribute('mid');
                         if (mid && !seen[mid] && /^\\d{10,}$/.test(mid)) {
                             seen[mid] = true;
@@ -864,6 +894,10 @@ class WeiboClient:
                         "text": dp.get("text", ""),
                         "user": "",
                     })
+                if posts:
+                    logger.info(
+                        f"DOM 提取到 {len(posts)} 条帖子"
+                    )
 
         except Exception as e:
             logger.warning(f"Playwright 获取超话帖子异常: {e}")
@@ -871,7 +905,7 @@ class WeiboClient:
             page.close()
 
         logger.info(
-            f"Playwright 获取到 {len(posts)} 条帖子 "
+            f"Playwright 获取帖子结果: {len(posts)} 条 "
             f"(containerid={containerid})"
         )
         return posts

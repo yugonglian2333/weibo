@@ -283,13 +283,15 @@ def create_notifier_from_env() -> Optional[Notifier]:
 def build_notification(
     checkin_results: list[dict],
     post_results: Optional[list[dict]] = None,
+    comment_results: Optional[list[dict]] = None,
 ) -> tuple[str, str]:
     """
-    根据签到和发帖结果构建通知标题和内容
+    根据签到、评论和发帖结果构建通知标题和内容
 
     Args:
         checkin_results: 签到结果列表
         post_results: 发帖结果列表（可为 None 或空列表）
+        comment_results: 评论结果列表（可为 None 或空列表）
 
     Returns:
         (title, content) 元组
@@ -316,6 +318,26 @@ def build_notification(
                 lines.append(f"  • {name} ❌ 签到失败")
     else:
         lines.append("📭 签到: 未配置")
+
+    # 评论汇总
+    if comment_results:
+        total_c = sum(len(r.get("comments", [])) for r in comment_results)
+        success_c = sum(
+            sum(1 for c in r.get("comments", []) if c.get("success"))
+            for r in comment_results
+        )
+        emoji = "✅" if success_c == total_c else ("⚠️" if success_c > 0 else "❌")
+        lines.append(f"{emoji} 评论: {success_c}/{total_c} 条成功")
+        for cr in comment_results:
+            topic = cr.get("topic", "未知")
+            lines.append(f"  • {topic}: {cr.get('message', '?')}")
+            for c in cr.get("comments", []):
+                user = c.get("post_user", "?")
+                comment = c.get("comment", "")[:20]
+                status = "✅" if c.get("success") else "❌"
+                lines.append(f"      {status} @{user} 「{comment}」")
+    else:
+        lines.append("💬 评论: 未开启或未配置")
 
     # 发帖汇总（支持多条）
     if post_results:
@@ -345,12 +367,20 @@ def build_notification(
 
     lines.append("━━━━━━━━━━━━━━")
 
-    # 标题：结合签到和发帖状态
+    # 标题：结合签到、评论和发帖状态
     title_parts = []
     if checkin_results:
         s = sum(1 for r in checkin_results if r["success"])
         t = len(checkin_results)
         title_parts.append(f"签到({s}/{t})")
+    if comment_results:
+        s = sum(
+            sum(1 for c in r.get("comments", []) if c.get("success"))
+            for r in comment_results
+        )
+        t = sum(len(r.get("comments", [])) for r in comment_results)
+        if t > 0:
+            title_parts.append(f"评论({s}/{t})")
     if post_results:
         s = sum(1 for r in post_results if r.get("success"))
         t = len(post_results)

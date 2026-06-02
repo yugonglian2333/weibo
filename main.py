@@ -759,7 +759,7 @@ def main():
             notifier = create_notifier_from_env()
             if notifier:
                 title, content = build_notification(
-                    checkin_results, post_results
+                    checkin_results, post_results, comment_results
                 )
                 if notifier.send(title, content):
                     logger.info("通知已发送")
