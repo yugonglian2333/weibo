@@ -21,13 +21,13 @@ jobs:
       - name: 设置 Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
-      - name: 安装依赖
-        run: |
-          pip install -r requirements.txt
-          # 如果使用 Claude API，取消下面这行注释
-          # pip install anthropic
+      - name: 安装 Python 依赖
+        run: pip install -r requirements.txt
+
+      - name: 安装 Playwright 浏览器（含系统依赖）
+        run: playwright install chromium --with-deps
 
       - name: 执行微博签到发帖
         env:

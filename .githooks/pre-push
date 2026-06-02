@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# ============================================================
+# Git pre-push hook：自动同步 .env 到 GitHub Actions Secrets
+# ============================================================
+# 当 .env 文件有变更时，push 前自动执行 sync_secrets.py
+#
+# 跳过同步（设置环境变量）:
+#   GIT_SYNC_SECRETS=0 git push
+# ============================================================
+
+set -e
+
+# 允许用户手动跳过
+if [ "${GIT_SYNC_SECRETS}" = "0" ] || [ "${GIT_SYNC_SECRETS}" = "false" ]; then
+    echo "⏭  已跳过 Secrets 同步 (GIT_SYNC_SECRETS=0)"
+    exit 0
+fi
+
+# 获取脚本所在目录（即项目根目录）
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$HOOK_DIR"
+
+# 读取 stdin 获取 push 信息
+# 格式: <local ref> <local sha1> <remote ref> <remote sha1>
+while read local_ref local_sha remote_ref remote_sha; do
+    # 检查 .env 是否在本次 push 的变更范围内
+    if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+        # 删除分支，跳过
+        continue
+    fi
+
+    if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+        # 新分支，检查所有 commits
+        changed=$(git diff --name-only "$local_sha" 2>/dev/null || true)
+    else
+        # 正常 push，检查差异
+        changed=$(git diff --name-only "$remote_sha..$local_sha" 2>/dev/null || true)
+    fi
+
+    if echo "$changed" | grep -q "^.env$"; then
+        echo ""
+        echo "╔══════════════════════════════════════════════════╗"
+        echo "║  检测到 .env 变更，自动同步到 GitHub Secrets...  ║"
+        echo "╚══════════════════════════════════════════════════╝"
+        echo ""
+
+        # 调用同步脚本
+        python "$PROJECT_DIR/sync_secrets.py"
+        if [ $? -ne 0 ]; then
+            echo ""
+            echo "❌ Secrets 同步失败，已阻止 push"
+            echo "   如需跳过同步: GIT_SYNC_SECRETS=0 git push"
+            exit 1
+        fi
+        echo ""
+        echo "✅ Secrets 同步完成，继续 push..."
+    fi
+
+done
+
+exit 0
