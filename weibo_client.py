@@ -193,47 +193,310 @@ class WeiboClient:
         """
         通过超话名称搜索获取 containerid
 
+        自动尝试多种搜索词变体（原名、原名+超话后缀）。
+        PC 端 Cookie 场景下跳过 requests 直接走 Playwright（避免触发验证码）。
+
         Args:
             name: 超话名称
 
         Returns:
             containerid 字符串，未找到返回 None
         """
-        url = f"{self.API_BASE}/container/getIndex"
-        params = {
-            "containerid": f"100103type=1&q={name}",
-            "page_type": "searchall",
-        }
-        data = self._request("GET", url, params=params)
-        if data is None or data.get("ok") != 1:
-            logger.error(f"搜索超话 '{name}' 失败")
-            return None
+        # 判断是否为 PC 端 Cookie
+        cookie_dict = self._parse_cookie_string(self.cookie)
+        is_pc_cookie = bool(cookie_dict.get("PC_TOKEN") or cookie_dict.get("_s_tentry"))
 
-        # 从搜索结果中筛选超话卡片
-        cards = data.get("data", {}).get("cards", [])
-        for card in cards:
-            if card.get("card_type") == 4:  # 超话类型 (card_type=4)
-                # card_group 中查找超话信息
-                card_group = card.get("card_group", [])
-                for group in card_group:
-                    title_sub = group.get("title_sub", "")
-                    if name in title_sub or name in group.get("title", ""):
-                        # 从 scheme 中提取 containerid
-                        # 格式: sinaweibo://supergroup?containerid=100808xxx
-                        scheme = group.get("scheme", "")
-                        # containerid 是 hex 字符串，必须匹配 [a-f0-9]
-                        match = re.search(
-                            r"containerid=([a-f0-9]+)", scheme
-                        )
-                        if match:
-                            containerid = match.group(1)
-                            logger.info(
-                                f"超话 '{name}' -> containerid: {containerid}"
-                            )
-                            return containerid
+        # 构建搜索词变体列表
+        search_names = [name]
+        if "超话" not in name:
+            search_names.append(name + "超话")
+
+        for search_name in search_names:
+            logger.info(f"搜索 '{search_name}'...")
+
+            if not is_pc_cookie:
+                # 移动端 Cookie：requests 优先
+                url = f"{self.API_BASE}/container/getIndex"
+                params = {
+                    "containerid": f"100103type=1&q={search_name}",
+                    "page_type": "searchall",
+                }
+                data = self._request("GET", url, params=params)
+                if data is not None and data.get("ok") == 1:
+                    cid = self._parse_containerid_from_search(data, search_name)
+                    if cid:
+                        return cid
+                logger.info("移动端 API 搜索失败，尝试 Playwright 浏览器搜索...")
+            else:
+                logger.info("PC 端 Cookie，直接使用 Playwright 浏览器搜索...")
+
+            # Playwright 浏览器搜索
+            cid = self._search_containerid_with_playwright(search_name)
+            if cid:
+                return cid
 
         logger.warning(f"未找到超话 '{name}'，请确认名称是否正确")
         return None
+
+    def _parse_containerid_from_search(
+        self, data: dict, name: str
+    ) -> Optional[str]:
+        """
+        从移动端搜索 API 响应中解析 containerid
+
+        超话卡片 (card_type=4) 可能出现在两个位置：
+        1. 搜索结果顶层的 card
+        2. 嵌套在其他 card 的 card_group 中
+
+        注意：卡片中的 title/title_sub 可能为空（搜索 API 已按名称过滤），
+        此时只要是 card_type=4 且有有效 containerid 就返回。
+        """
+        cards = data.get("data", {}).get("cards", [])
+        search_name = name.replace("超话", "")
+
+        for card in cards:
+            # 遍历顶层 card 及所有 card_group 子项
+            all_groups = list(card.get("card_group", []))
+            if card.get("card_type") == 4:
+                all_groups.insert(0, card)
+
+            for group in all_groups:
+                if group.get("card_type") != 4:
+                    continue
+                title_sub = group.get("title_sub", "")
+                title = group.get("title", "")
+                scheme = group.get("scheme", "")
+
+                # 提取 containerid
+                match = re.search(
+                    r"containerid=([a-f0-9]+)", scheme
+                )
+                if not match:
+                    continue
+                containerid = match.group(1)
+
+                # 名称匹配：放宽条件，title 为空时也接受
+                # （搜索 API 已按名称过滤，card_type=4 即为目标超话）
+                name_matched = (
+                    search_name in title_sub
+                    or search_name in title
+                    or name in title_sub
+                    or name in title
+                )
+                if name_matched or (not title and not title_sub):
+                    logger.info(
+                        f"超话 '{title or title_sub or name}' -> containerid: {containerid}"
+                    )
+                    return containerid
+
+        return None
+
+    def _search_containerid_with_playwright(
+        self, name: str
+    ) -> Optional[str]:
+        """
+        使用 Playwright 浏览器在 weibo.com PC 端搜索超话
+
+        PC 端 Cookie 无法通过 m.weibo.cn 移动端 API 的登录验证（返回
+        retcode=6102 / ok=-100），因此改用 weibo.com PC 端搜索：
+
+        1. 登录 weibo.com → 调用 ajax/statuses/search 搜索帖子
+        2. 从帖子中提取所有 100808 开头的超话 containerid（按频率排序）
+        3. 逐个访问超话页面，从页面标题提取超话名称
+        4. 精确匹配优先（"鞠婧祎超话" > "鞠婧祎周边市场超话"）
+        """
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            logger.warning("Playwright 未安装，无法搜索超话")
+            return None
+
+        import json as _json
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                ctx = browser.new_context()
+
+                # 添加 Cookie（PC 端只需 weibo.com 域）
+                cookie_dict = self._parse_cookie_string(self.cookie)
+                pw_cookies = []
+                for key, value in cookie_dict.items():
+                    for domain in (".weibo.com", "weibo.com"):
+                        pw_cookies.append({
+                            "name": key, "value": value,
+                            "domain": domain, "path": "/",
+                        })
+                ctx.add_cookies(pw_cookies)
+
+                page = ctx.new_page()
+
+                # 登录 weibo.com PC 端
+                logger.info("登录 weibo.com（PC 端）...")
+                page.goto(
+                    "https://weibo.com/",
+                    wait_until="domcontentloaded",
+                    timeout=30000,
+                )
+                page.wait_for_timeout(3000)
+
+                # —— 第 1 步：搜索帖子，提取超话 containerid 候选项 ——
+                search_names = [name]
+                if "超话" not in name:
+                    search_names.append(name + "超话")
+
+                all_candidates = {}  # {cid: 出现次数}
+
+                for sname in search_names:
+                    logger.info(f"PC 端搜索: {sname}")
+                    resp = page.request.get(
+                        "https://weibo.com/ajax/statuses/search",
+                        params={"q": sname, "type": "all", "page": "1"},
+                        headers={
+                            "X-Requested-With": "XMLHttpRequest",
+                            "Accept": "application/json",
+                            "Referer": "https://weibo.com/",
+                        },
+                    )
+                    if resp.status != 200:
+                        continue
+                    try:
+                        data = _json.loads(resp.text())
+                    except Exception:
+                        continue
+                    if data.get("ok") != 1:
+                        continue
+
+                    # 提取所有 100808 开头的超话 containerid
+                    flat = _json.dumps(data, ensure_ascii=False)
+                    cids = re.findall(r"(100808[a-f0-9]{26,})", flat)
+                    for cid in cids:
+                        all_candidates[cid] = all_candidates.get(cid, 0) + 1
+
+                if not all_candidates:
+                    logger.warning(f"PC 端搜索未找到超话候选项: {name}")
+                    page.close()
+                    browser.close()
+                    return None
+
+                # 按出现频率降序排列（主超话出现频率最高）
+                sorted_candidates = sorted(
+                    all_candidates.items(), key=lambda x: -x[1]
+                )
+                logger.info(
+                    f"找到 {len(sorted_candidates)} 个候选超话，"
+                    f"按频率排序: {[(c[0][:16] + '...', c[1]) for c in sorted_candidates[:5]]}"
+                )
+
+                # —— 第 2 步：逐个访问候选超话页面，验证名称 ——
+                search_name_clean = name.replace("超话", "")
+
+                best_partial_match = None  # (cid, topic_name_clean, extra_len)
+
+                for cid, freq in sorted_candidates[:5]:
+                    try:
+                        topic_url = (
+                            f"https://weibo.com/p/{cid}/super_index"
+                        )
+                        resp2 = page.goto(
+                            topic_url,
+                            wait_until="domcontentloaded",
+                            timeout=15000,
+                        )
+                        page.wait_for_timeout(1500)
+
+                        if "sorry" in page.url or resp2.status != 200:
+                            continue
+
+                        # 从页面标题提取超话名称
+                        page_title = page.title()
+                        content = page.content()
+                        topic_name = None
+
+                        if page_title:
+                            topic_name = page_title
+                        # 也尝试从页面内嵌 JSON 中提取
+                        title_matches = re.findall(
+                            r'"page_title"\s*:\s*"([^"]+)"', content
+                        )
+                        if title_matches:
+                            topic_name = title_matches[0]
+
+                        if not topic_name:
+                            continue
+
+                        # 清洗名称：去掉 "超话" 后缀和 "-微博超话社区" 等
+                        topic_name_clean = (
+                            topic_name
+                            .replace("-微博超话社区", "")
+                            .replace("超话", "")
+                            .strip()
+                        )
+
+                        # 精确匹配：立即返回
+                        if topic_name_clean == search_name_clean:
+                            logger.info(
+                                f"精确匹配: 「{topic_name_clean}」"
+                                f" -> containerid: {cid}"
+                            )
+                            page.close()
+                            browser.close()
+                            return cid
+
+                        # 模糊匹配：记录最佳候选项
+                        if search_name_clean in topic_name_clean:
+                            extra = topic_name_clean.replace(
+                                search_name_clean, ""
+                            )
+                            # 额外字符 <= 2 视为近似匹配，立即返回
+                            if len(extra) <= 2:
+                                logger.info(
+                                    f"近似匹配: 「{topic_name_clean}」"
+                                    f" -> containerid: {cid}"
+                                )
+                                page.close()
+                                browser.close()
+                                return cid
+                            # 额外字符 > 2：记录为备选（选最短的）
+                            if (
+                                best_partial_match is None
+                                or len(extra) < best_partial_match[2]
+                            ):
+                                best_partial_match = (
+                                    cid,
+                                    topic_name_clean,
+                                    len(extra),
+                                )
+                                logger.info(
+                                    f"备选匹配: 「{topic_name_clean}」"
+                                    f"（包含 '{search_name_clean}'，"
+                                    f"额外 {len(extra)} 字符）"
+                                )
+                    except Exception as e:
+                        logger.debug(
+                            f"检查候选 {cid[:20]}... 失败: {e}"
+                        )
+                        continue
+
+                # 没有精确匹配时，返回最佳模糊匹配
+                if best_partial_match:
+                    cid, topic_name_clean, _ = best_partial_match
+                    logger.info(
+                        f"使用最佳模糊匹配: 「{topic_name_clean}」"
+                        f" -> containerid: {cid}"
+                    )
+                    page.close()
+                    browser.close()
+                    return cid
+
+                page.close()
+                browser.close()
+                logger.warning(f"未找到匹配超话: {name}")
+                return None
+
+        except Exception as e:
+            logger.error(f"PC 端搜索超话 '{name}' 异常: {e}")
+            return None
 
     def checkin_super_topic(
         self, containerid: str, topic_name: str = None
@@ -308,6 +571,230 @@ class WeiboClient:
         result = self._checkin_mobile_api(containerid, topic_name)
         return result
 
+    def get_super_topic_posts(
+        self, containerid: str, count: int = 3
+    ) -> list[dict]:
+        """
+        获取超话下的前 N 个帖子
+
+        Args:
+            containerid: 超话的 containerid
+            count: 获取帖子数量（默认 3）
+
+        Returns:
+            [{"id": str, "mid": str, "text": str, "user": str}, ...]
+            其中 text 已去除 HTML 标签，mid 用于评论 API
+        """
+        url = f"{self.API_BASE}/container/getIndex"
+        params = {"containerid": containerid, "page": 1}
+        data = self._request("GET", url, params=params)
+
+        posts = []
+        if data is None or data.get("ok") != 1:
+            logger.warning(f"获取超话帖子失败: containerid={containerid}")
+            return posts
+
+        cards = data.get("data", {}).get("cards", [])
+
+        for card in cards:
+            # 有些帖子直接就是卡片，有些嵌套在 card_group 中
+            candidates = []
+            card_type = card.get("card_type")
+            if card_type in (9, 11, 0):
+                candidates.append(card)
+            for group in card.get("card_group", []):
+                group_type = group.get("card_type")
+                if group_type in (9, 11):
+                    candidates.append(group)
+
+            for c in candidates:
+                mblog = c.get("mblog", {})
+                if not mblog:
+                    continue
+
+                text_raw = mblog.get("text", "")
+                # 去除 HTML 标签
+                text_clean = re.sub(r"<[^>]*>", "", text_raw).strip()
+                # 截取前 200 字给 AI 做上下文
+                text_preview = text_clean[:200]
+
+                post = {
+                    "id": mblog.get("id", ""),
+                    "mid": mblog.get("mid", ""),
+                    "text": text_preview,
+                    "user": mblog.get("user", {}).get("screen_name", ""),
+                }
+                posts.append(post)
+
+                if len(posts) >= count:
+                    break
+
+            if len(posts) >= count:
+                break
+
+        logger.info(
+            f"获取到 {len(posts)} 条帖子 (containerid={containerid})"
+        )
+        return posts
+
+    def comment_post(
+        self, post_mid: str, content: str, post_id: str = ""
+    ) -> dict:
+        """
+        评论一条微博
+
+        Args:
+            post_mid: 微博 mid（评论 API 使用）
+            content: 评论内容
+            post_id: 微博 id（可选，用于 Referer）
+
+        Returns:
+            {"success": bool, "message": str}
+        """
+        result = {"success": False, "message": ""}
+
+        if not content.strip():
+            result["message"] = "评论内容为空，跳过"
+            return result
+
+        # 字数截断（微博评论限制）
+        if len(content) > 140:
+            content = content[:137] + "..."
+
+        # 检测 Cookie 类型
+        cookie_dict = self._parse_cookie_string(self.cookie)
+        has_pc_cookie = bool(
+            cookie_dict.get("PC_TOKEN") or cookie_dict.get("_s_tentry")
+        )
+
+        if has_pc_cookie:
+            logger.info("检测到 PC 端 Cookie，使用 Playwright 评论...")
+            return self._comment_with_playwright(post_mid, content)
+
+        # ---- 移动端评论 ----
+        st = self._get_fresh_st()
+        if not st:
+            result["message"] = "缺少 CSRF token，无法评论"
+            logger.warning(result["message"])
+            return result
+
+        url = f"{self.API_BASE}/api/comments/create"
+        headers = {
+            "X-XSRF-TOKEN": st,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": (
+                f"https://m.weibo.cn/detail/{post_id}"
+                if post_id
+                else "https://m.weibo.cn/"
+            ),
+        }
+        data_payload = {
+            "content": content,
+            "mid": post_mid,
+            "st": st,
+        }
+
+        resp_data = self._request(
+            "POST", url, headers=headers, data=data_payload
+        )
+
+        if resp_data is None:
+            result["message"] = f"❌ 评论请求失败（网络错误）mid={post_mid}"
+            logger.warning(result["message"])
+            return result
+
+        if resp_data.get("ok") == 1:
+            result["success"] = True
+            result["message"] = f"✅ 评论成功: {content[:30]}..."
+        else:
+            errmsg = resp_data.get("msg", "未知错误")
+            errno = resp_data.get("errno", "")
+            result["message"] = (
+                f"❌ 评论失败: {errmsg} (errno={errno})"
+            )
+
+        logger.info(result["message"])
+        return result
+
+    def _comment_with_playwright(
+        self, post_mid: str, content: str
+    ) -> dict:
+        """
+        使用 Playwright 浏览器在 PC 端评论
+        复用签到时的浏览器上下文
+        """
+        result = {"success": False, "message": ""}
+
+        context = self._get_pw_context()
+        if context is None:
+            result["message"] = "Playwright 未安装，无法使用 PC 端评论"
+            logger.warning(result["message"])
+            return result
+
+        cookie_dict = self._parse_cookie_string(self.cookie)
+        st = cookie_dict.get("XSRF-TOKEN", "")
+
+        page = context.new_page()
+
+        try:
+            comment_url = "https://weibo.com/aj/v6/comment/add"
+            api_resp = page.request.post(
+                comment_url,
+                headers={
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Accept": (
+                        "application/json, text/javascript, */*; q=0.01"
+                    ),
+                    "Content-Type": (
+                        "application/x-www-form-urlencoded; charset=UTF-8"
+                    ),
+                    "Referer": f"https://weibo.com/{post_mid}",
+                },
+                form={
+                    "mid": post_mid,
+                    "content": content,
+                    "st": st,
+                    "_t": "0",
+                },
+            )
+
+            body = api_resp.text()
+            logger.info(
+                f"PC端评论响应: status={api_resp.status}, "
+                f"body[:200]={body[:200]}"
+            )
+
+            try:
+                import json
+
+                data = json.loads(body)
+            except Exception:
+                result["message"] = "评论响应解析失败"
+                logger.warning(result["message"])
+                return result
+
+            code = str(data.get("code", ""))
+            if code == "100000":
+                result["success"] = True
+                result["message"] = (
+                    f"✅ 评论成功（PC端）: {content[:30]}..."
+                )
+            else:
+                msg = data.get("msg", "")
+                result["message"] = (
+                    f"❌ 评论失败（PC端）: {msg} (code={code})"
+                )
+
+            logger.info(result["message"])
+
+        except Exception as e:
+            logger.error(f"PC端评论异常: {e}")
+            result["message"] = f"❌ PC端评论异常: {e}"
+        finally:
+            page.close()
+
+        return result
+
     def cleanup(self):
         """清理资源（关闭 Playwright 浏览器等）"""
         self._close_pw()
@@ -325,10 +812,23 @@ class WeiboClient:
 
         logger.info("启动 Playwright 浏览器（复用会话）...")
         self._pw_playwright = sync_playwright().start()
-        self._pw_browser = self._pw_playwright.chromium.launch(headless=True)
-        self._pw_context = self._pw_browser.new_context()
+        self._pw_browser = self._pw_playwright.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+            ],
+        )
+        self._pw_context = self._pw_browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+        )
 
-        # 解析并添加 Cookie
+        # 解析并添加 Cookie（同时覆盖 .weibo.com 和 .weibo.cn 域）
         cookie_dict = self._parse_cookie_string(self.cookie)
         pw_cookies = []
         for key, value in cookie_dict.items():
@@ -336,6 +836,12 @@ class WeiboClient:
                 "name": key,
                 "value": value,
                 "domain": ".weibo.com",
+                "path": "/",
+            })
+            pw_cookies.append({
+                "name": key,
+                "value": value,
+                "domain": ".weibo.cn",
                 "path": "/",
             })
         self._pw_context.add_cookies(pw_cookies)

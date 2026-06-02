@@ -14,6 +14,7 @@
 import subprocess
 import sys
 import os
+import shutil
 import argparse
 import io
 
@@ -64,14 +65,66 @@ def parse_dotenv(env_path: str) -> dict[str, str]:
     return result
 
 
+def find_gh() -> str | None:
+    """查找 gh.exe 的完整路径（PATH 可能不传递到子进程）"""
+    # 1. 用 shutil.which 在 PATH 中查找
+    path = shutil.which("gh")
+    if path:
+        return path
+
+    # 2. 尝试常见安装路径
+    candidates = []
+    if sys.platform == "win32":
+        candidates = [
+            os.path.expandvars(r"%LocalAppData%\Programs\GitHub CLI\bin\gh.exe"),
+            os.path.expandvars(r"%ProgramFiles%\GitHub CLI\bin\gh.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\GitHub CLI\bin\gh.exe"),
+            r"C:\Program Files\GitHub CLI\bin\gh.exe",
+        ]
+    else:
+        candidates = [
+            "/usr/local/bin/gh",
+            "/usr/bin/gh",
+            "/opt/homebrew/bin/gh",
+        ]
+
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+
+    return None
+
+
+def check_gh_installed() -> bool:
+    """检查 GitHub CLI 是否已安装"""
+    return find_gh() is not None
+
+
+_GH_PATH = None
+
+
+def gh_path() -> str:
+    """获取 gh 可执行文件路径，找不到则报错退出"""
+    global _GH_PATH
+    if _GH_PATH:
+        return _GH_PATH
+    _GH_PATH = find_gh()
+    if not _GH_PATH:
+        print("❌ 未检测到 GitHub CLI (gh)，请先安装并登录：")
+        print("   1. 下载安装: https://cli.github.com/")
+        print("   2. 登录认证: gh auth login")
+        sys.exit(1)
+    return _GH_PATH
+
+
 def get_github_repo() -> str:
     """获取当前仓库的 owner/repo 格式"""
     result = subprocess.run(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-        capture_output=True, text=True
+        [gh_path(), "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+        capture_output=True, text=True, encoding="utf-8"
     )
     if result.returncode != 0:
-        print("❌ 无法获取 GitHub 仓库信息，请确认在仓库目录中执行")
+        print("❌ 无法获取 GitHub 仓库信息，请确认在仓库目录中执行，且已登录 gh")
         sys.exit(1)
     return result.stdout.strip()
 
@@ -79,11 +132,11 @@ def get_github_repo() -> str:
 def set_secret(repo: str, name: str, value: str, environment: str = None):
     """通过 gh CLI 设置 GitHub Secret"""
     if environment:
-        cmd = ["gh", "secret", "set", name, "--repo", repo, "--env", environment, "--body", value]
+        cmd = [gh_path(), "secret", "set", name, "--repo", repo, "--env", environment, "--body", value]
     else:
-        cmd = ["gh", "secret", "set", name, "--repo", repo, "--body", value]
+        cmd = [gh_path(), "secret", "set", name, "--repo", repo, "--body", value]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     return result.returncode == 0
 
 

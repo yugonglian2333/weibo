@@ -1,12 +1,16 @@
 checkin:
   topics:
-  - name: 鞠婧祎超话
+  - name: 鞠婧祎
     containerid: 1008086f1b7983ba4fca7456e28317e78127ed
+  - name: 阿黛
+    containerid: 1008087adb46ea03ecbf42e7dda55bd56415d6
+  - name: 万花世界
+    containerid: 10080863220c0b00489deb171fc85e532f97da
 posting:
   enabled: true
   topics:
-  - 鞠婧祎超话
-  - 张婧仪超话
+  - 鞠婧祎
+  - 鞠婧祎阿黛
   style: 自然随性
   min_words: 50
   max_words: 200

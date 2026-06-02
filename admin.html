@@ -545,6 +545,63 @@ select {
   50% { opacity: 0.4; }
 }
 
+/* 操作中心 */
+.op-card {
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 14px;
+  transition: all var(--transition);
+}
+.op-card:hover { border-color: #ccc; }
+.op-card .op-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+.op-card .op-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 14px; }
+.op-card .op-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.op-card input { max-width: 280px; }
+
+.log-viewer {
+  background: #1e1e2e; color: #cdd6f4;
+  border-radius: var(--radius); padding: 16px;
+  font-family: "SF Mono", "Cascadia Code", "Fira Code", monospace;
+  font-size: 12px; line-height: 1.7;
+  max-height: 500px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-all;
+}
+.log-viewer .log-info  { color: #89b4fa; }
+.log-viewer .log-warn  { color: #fab387; }
+.log-viewer .log-error { color: #f38ba8; }
+.log-viewer .log-ok    { color: #a6e3a1; }
+.log-empty { color: #585b70; text-align: center; padding: 40px; }
+
+.result-card {
+  margin-top: 12px; padding: 12px 16px;
+  border-radius: 8px; font-size: 13px; display: none;
+}
+.result-card.show { display: block; }
+.result-card.success { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+.result-card.error   { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+.result-card.info    { background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
+.result-card pre { margin: 6px 0 0; white-space: pre-wrap; font-size: 12px; }
+
+.spinner {
+  display: inline-block; width: 16px; height: 16px;
+  border: 2px solid #ccc; border-top-color: var(--primary);
+  border-radius: 50%; animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.steps { counter-reset: step; margin: 16px 0; }
+.step { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; counter-increment: step; }
+.step .step-num {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--primary-light); color: var(--primary);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; flex-shrink: 0;
+}
+.step .step-text { font-size: 13px; line-height: 1.8; }
+.step .step-text code { background: #f0f0f0; padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+
 /* ============================================================
    响应式
    ============================================================ */
@@ -592,6 +649,9 @@ select {
   </span>
 
   <div class="header-actions">
+    <button class="btn btn-success btn-sm" onclick="runAll()" title="执行完整签到+发帖+通知流程">
+      🚀 完整执行
+    </button>
     <button class="btn btn-secondary btn-sm" onclick="importConfig()" title="从现有 config.yaml / .env 导入">
       📥 导入配置
     </button>
@@ -628,6 +688,9 @@ select {
     <button class="tab-btn" onclick="switchTab('export')">
       <span class="tab-icon">📋</span> 导出
     </button>
+    <button class="tab-btn" onclick="switchTab('logs')">
+      <span class="tab-icon">📊</span> 日志
+    </button>
   </div>
 
   <!-- ============================================================
@@ -653,6 +716,39 @@ select {
       <div class="form-hint" style="margin-top:12px;">
         💡 <strong>提示：</strong>containerid 留空则自动搜索。推荐手动填入（格式：100808...），更可靠。
       </div>
+    </div>
+
+    <!-- 签到测试 -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🧪 签到测试</div>
+      </div>
+      <div class="op-card">
+        <div class="op-desc">对指定超话执行签到，containerid 留空则自动搜索</div>
+        <div class="op-row">
+          <input type="text" id="checkin-name" placeholder="超话名称（如：鞠婧祎超话）">
+          <input type="text" id="checkin-cid" placeholder="containerid（可选）" style="max-width:320px;">
+          <button class="btn btn-primary btn-sm" onclick="runCheckin()">▶ 执行签到</button>
+          <span id="checkin-spinner" style="display:none;"><span class="spinner"></span></span>
+        </div>
+      </div>
+      <div id="checkin-result" class="result-card"></div>
+    </div>
+
+    <!-- 容器ID查询 -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🔍 查询容器ID</div>
+      </div>
+      <div class="op-card">
+        <div class="op-desc">通过超话名称搜索对应的 containerid，用于手动填入签到列表</div>
+        <div class="op-row">
+          <input type="text" id="search-name" placeholder="超话名称">
+          <button class="btn btn-secondary btn-sm" onclick="searchCid()">🔍 搜索</button>
+          <span id="search-spinner" style="display:none;"><span class="spinner"></span></span>
+        </div>
+      </div>
+      <div id="search-result" class="result-card"></div>
     </div>
 
   </div>
@@ -719,6 +815,22 @@ select {
           <div class="form-hint">AI 生成内容的最多字数（微博上限 2000 字）</div>
         </div>
       </div>
+    </div>
+
+    <!-- 发帖测试 -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🧪 AI 发帖测试</div>
+      </div>
+      <div class="op-card">
+        <div class="op-desc">用 AI 生成内容并发布到微博（使用当前配置的 AI 服务商和风格）</div>
+        <div class="op-row">
+          <input type="text" id="post-test-topic" placeholder="话题名称">
+          <button class="btn btn-primary btn-sm" onclick="runPosting()">▶ 生成并发布</button>
+          <span id="posting-spinner" style="display:none;"><span class="spinner"></span></span>
+        </div>
+      </div>
+      <div id="posting-result" class="result-card"></div>
     </div>
 
   </div>
@@ -931,10 +1043,80 @@ select {
       </div>
     </div>
 
+    <!-- 获取微博 Cookie -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">🍪 获取微博 Cookie</div>
+          <div class="card-desc">打开浏览器登录 → 自动提取 → 命名保存。支持多账号。</div>
+        </div>
+        <span id="cookie-status" class="badge badge-info">就绪</span>
+      </div>
+
+      <div class="steps">
+        <div class="step"><div class="step-num">1</div><div class="step-text">点击下方按钮，浏览器会自动打开微博登录页</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-text">在浏览器中<strong>手动扫码或输入账号密码</strong>登录（最长等待 5 分钟）</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-text">登录成功后 Cookie 会<strong>显示在下方</strong>，输入名称后保存到 <code>.env</code></div></div>
+      </div>
+
+      <button class="btn btn-primary" onclick="fetchCookie()" id="btn-fetch-cookie">
+        🔓 打开登录页面
+      </button>
+      <span style="margin-left:10px;font-size:13px;color:var(--text-secondary);">
+        需要 Playwright：<code>pip install playwright && playwright install chromium</code>
+      </span>
+
+      <div id="cookie-result" class="result-card"></div>
+
+      <div id="cookie-save-area" style="display:none; margin-top:14px;">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">环境变量名</label>
+            <input type="text" id="cookie-key" placeholder="WEIBO_COOKIE_ACCOUNT1" value="WEIBO_COOKIE">
+            <div class="form-hint">多账号用不同名称区分，如 WEIBO_COOKIE_A、WEIBO_COOKIE_B</div>
+          </div>
+          <div class="form-group" style="display:flex;align-items:flex-end;gap:8px;">
+            <button class="btn btn-success btn-sm" onclick="saveCookie()" style="height:38px;">💾 保存到 .env</button>
+            <button class="btn btn-secondary btn-sm" onclick="copyCookieText()" style="height:38px;">📋 复制</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Cookie 内容</label>
+          <textarea id="cookie-text" rows="4" readonly
+            style="font-family:monospace;font-size:12px;resize:vertical;"
+            placeholder="提取成功后显示在这里..."></textarea>
+          <div class="form-hint" id="cookie-info"></div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- ============================================================
-       Tab 6: 导出配置
+       Tab 6: 运行日志
+       ============================================================ -->
+  <div id="tab-logs" class="tab-content" style="display:none;">
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">📊 运行日志</div>
+          <div class="card-desc">实时查看后台操作日志</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-secondary btn-sm" onclick="refreshLogs()">🔄 刷新</button>
+          <button class="btn btn-danger btn-sm" onclick="clearLogs()">🗑 清空</button>
+        </div>
+      </div>
+      <div id="log-viewer" class="log-viewer">
+        <div class="log-empty">暂无日志，执行操作后会自动显示</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============================================================
+       Tab 7: 导出配置
        ============================================================ -->
   <div id="tab-export" class="tab-content" style="display:none;">
 
@@ -966,6 +1148,22 @@ select {
         将 <code>config.yaml</code> 放在项目根目录覆盖原文件；
         将 <code>.env</code> 内容用于本地运行（或手动同步到 GitHub Secrets）。
       </div>
+    </div>
+
+    <!-- GitHub Secrets 同步 -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🔄 同步到 GitHub</div>
+      </div>
+      <div class="op-card">
+        <div class="op-desc">将 .env 中的敏感信息同步到 GitHub Actions Secrets（需安装 GitHub CLI）</div>
+        <div class="op-row">
+          <button class="btn btn-secondary btn-sm" onclick="syncSecrets(true)">🔍 预览</button>
+          <button class="btn btn-primary btn-sm" onclick="syncSecrets(false)">⬆ 同步</button>
+          <span id="sync-spinner" style="display:none;"><span class="spinner"></span></span>
+        </div>
+      </div>
+      <div id="sync-result" class="result-card"></div>
     </div>
 
   </div>
@@ -1969,6 +2167,255 @@ const debouncedSaveToServer = debounceFn(() => saveToServer(), 800);
 
 function logger(msg) {
   console.log(`[后台系统] ${msg}`);
+}
+
+/* ============================================================
+   操作中心 API 调用
+   ============================================================ */
+
+async function apiPost(path, body = {}) {
+  if (!serverAvailable) {
+    showToast('请通过后台服务器访问（python admin_server.py）', 'error');
+    return null;
+  }
+  try {
+    const resp = await fetch(`${serverBase}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return await resp.json();
+  } catch (e) {
+    showToast('请求失败: ' + e.message, 'error');
+    return null;
+  }
+}
+
+async function apiGet(path) {
+  if (!serverAvailable) {
+    showToast('请通过后台服务器访问', 'error');
+    return null;
+  }
+  try {
+    const resp = await fetch(`${serverBase}${path}`);
+    return await resp.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+// ---- Cookie 获取 ----
+let cookiePollTimer = null;
+let currentCookie = '';
+
+async function fetchCookie() {
+  const btn = document.getElementById('btn-fetch-cookie');
+  btn.disabled = true;
+  btn.textContent = '⏳ 启动中...';
+  document.getElementById('cookie-status').textContent = '运行中';
+  document.getElementById('cookie-status').className = 'badge badge-warning';
+  document.getElementById('cookie-save-area').style.display = 'none';
+  document.getElementById('cookie-result').className = 'result-card';
+
+  const res = await apiPost('/api/cookie/fetch');
+  if (!res || !res.ok) {
+    btn.disabled = false;
+    btn.textContent = '🔓 打开登录页面';
+    document.getElementById('cookie-status').textContent = '失败';
+    document.getElementById('cookie-status').className = 'badge badge-warning';
+    showResult('cookie-result', 'error', res?.message || '启动失败');
+    return;
+  }
+
+  btn.textContent = '⏳ 等待登录中...（浏览器窗口已打开）';
+  showResult('cookie-result', 'info', '浏览器已打开，请在浏览器中登录微博。检测到登录后会自动提取 Cookie...');
+
+  // 轮询状态
+  cookiePollTimer = setInterval(async () => {
+    const status = await apiGet('/api/cookie/status');
+    if (!status || !status.running) {
+      clearInterval(cookiePollTimer);
+      btn.disabled = false;
+      btn.textContent = '🔓 打开登录页面';
+
+      if (status?.result?.ok) {
+        currentCookie = status.result.cookie || '';
+        document.getElementById('cookie-status').textContent = '已获取';
+        document.getElementById('cookie-status').className = 'badge badge-success';
+        document.getElementById('cookie-result').className = 'result-card';
+
+        // 显示在 textarea 中
+        document.getElementById('cookie-text').value = currentCookie;
+        document.getElementById('cookie-info').textContent =
+          `长度: ${status.result.cookie_length} 字符 | 关键字段: ${(status.result.key_fields||[]).join(', ')}`;
+        document.getElementById('cookie-save-area').style.display = '';
+
+        // 自动生成 key 名建议
+        const existingKey = document.getElementById('cookie-key').value;
+        if (!existingKey || existingKey === 'WEIBO_COOKIE') {
+          // 保持默认，用户可自行改为 WEIBO_COOKIE_ACCOUNT1 等
+        }
+
+        showToast('Cookie 提取成功！输入名称后保存', 'success');
+      } else {
+        document.getElementById('cookie-status').textContent = '就绪';
+        document.getElementById('cookie-status').className = 'badge badge-info';
+        showResult('cookie-result', 'error', '❌ ' + (status?.result?.message || '获取失败'));
+      }
+    }
+  }, 2000);
+}
+
+async function saveCookie() {
+  const cookie = document.getElementById('cookie-text').value.trim();
+  const key = document.getElementById('cookie-key').value.trim() || 'WEIBO_COOKIE';
+  if (!cookie) { showToast('Cookie 为空', 'error'); return; }
+
+  const res = await apiPost('/api/cookie/save', { cookie, key });
+  if (res && res.ok) {
+    showToast(`已保存到 .env (${res.key}) ✓`, 'success');
+    // 如果是默认 key，同步到高级设置的 Cookie 字段
+    if (key === 'WEIBO_COOKIE') {
+      document.getElementById('weibo-cookie').value = '(已从浏览器获取)';
+    }
+  } else {
+    showToast('保存失败: ' + (res?.message || ''), 'error');
+  }
+}
+
+function copyCookieText() {
+  const text = document.getElementById('cookie-text').value;
+  if (!text) { showToast('没有可复制的内容', 'error'); return; }
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('已复制到剪贴板 ✓', 'success');
+  }).catch(() => {
+    document.getElementById('cookie-text').select();
+    document.execCommand('copy');
+    showToast('已复制 ✓', 'success');
+  });
+}
+
+// ---- 手动签到 ----
+async function runCheckin() {
+  const name = document.getElementById('checkin-name').value.trim();
+  const cid = document.getElementById('checkin-cid').value.trim();
+  if (!name) { showToast('请输入超话名称', 'error'); return; }
+
+  toggleSpinner('checkin-spinner', true);
+  const res = await apiPost('/api/checkin/run', { name, containerid: cid });
+  toggleSpinner('checkin-spinner', false);
+
+  if (res) {
+    const cls = res.ok ? 'success' : 'error';
+    showResult('checkin-result', cls, JSON.stringify(res.data || res, null, 2));
+    refreshLogs();
+  }
+}
+
+// ---- 容器ID查询 ----
+async function searchCid() {
+  const name = document.getElementById('search-name').value.trim();
+  if (!name) { showToast('请输入超话名称', 'error'); return; }
+
+  toggleSpinner('search-spinner', true);
+  const res = await apiPost('/api/containerid', { name });
+  toggleSpinner('search-spinner', false);
+
+  if (res) {
+    const cls = res.ok && res.containerid ? 'success' : 'error';
+    const msg = res.containerid
+      ? `✅ 找到: ${res.name}\ncontainerid: ${res.containerid}`
+      : `❌ ${res.message || '未找到'}`;
+    showResult('search-result', cls, msg);
+  }
+}
+
+// ---- AI 发帖测试 ----
+async function runPosting() {
+  const topic = document.getElementById('post-test-topic').value.trim();
+  if (!topic) { showToast('请输入话题名称', 'error'); return; }
+
+  toggleSpinner('posting-spinner', true);
+  const res = await apiPost('/api/posting/run', {
+    topics: [topic],
+    style: config.postStyle,
+    min_words: config.postMinWords,
+    max_words: config.postMaxWords,
+  });
+  toggleSpinner('posting-spinner', false);
+
+  if (res) {
+    const cls = res.ok ? 'success' : 'error';
+    const r = (res.data || [])[0] || {};
+    const msg = r.success
+      ? `✅ 发帖成功!\n话题: ${r.topic}\n微博ID: ${r.weibo_id}\n\n${r.content || ''}`
+      : `❌ ${r.message || res.message}`;
+    showResult('posting-result', cls, msg);
+    refreshLogs();
+  }
+}
+
+// ---- 完整执行 ----
+async function runAll() {
+  if (!confirm('确定要执行完整流程吗？\n(签到 + AI发帖 + 通知推送)')) return;
+
+  toggleSpinner('runall-spinner', true);
+  const res = await apiPost('/api/run-all');
+  toggleSpinner('runall-spinner', false);
+
+  if (res) {
+    showResult('runall-result', 'info', '⏳ 已在后台启动，请切换到"日志"标签页查看进度');
+    showToast('正在后台执行...', 'success');
+    // 切换到日志 tab
+    setTimeout(() => { switchTab('logs'); refreshLogs(); }, 500);
+  }
+}
+
+// ---- GitHub Secrets 同步 ----
+async function syncSecrets(dryRun) {
+  toggleSpinner('sync-spinner', true);
+  const res = await apiPost('/api/secrets/sync', { dry_run: dryRun });
+  toggleSpinner('sync-spinner', false);
+
+  if (res) {
+    const cls = res.ok ? 'success' : 'error';
+    showResult('sync-result', cls, (dryRun ? '[预览模式]\n' : '') + res.message);
+  }
+}
+
+// ---- 日志 ----
+async function refreshLogs() {
+  const res = await apiGet('/api/logs?limit=100');
+  const viewer = document.getElementById('log-viewer');
+  if (!res || !res.logs || res.logs.length === 0) {
+    viewer.innerHTML = '<div class="log-empty">暂无日志</div>';
+    return;
+  }
+  viewer.innerHTML = res.logs.map(line => {
+    let cls = 'log-info';
+    if (line.includes('[ERROR]') || line.includes('失败') || line.includes('❌')) cls = 'log-error';
+    else if (line.includes('[WARNING]') || line.includes('⚠')) cls = 'log-warn';
+    else if (line.includes('成功') || line.includes('✅') || line.includes('完成')) cls = 'log-ok';
+    return `<span class="${cls}">${escapeHtml(line)}</span>`;
+  }).join('\n');
+  viewer.scrollTop = viewer.scrollHeight;
+}
+
+function clearLogs() {
+  document.getElementById('log-viewer').innerHTML = '<div class="log-empty">日志已清空</div>';
+}
+
+// ---- 工具 ----
+function toggleSpinner(id, show) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = show ? '' : 'none';
+}
+
+function showResult(id, type, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = `result-card ${type} show`;
+  el.innerHTML = `<pre>${escapeHtml(msg)}</pre>`;
 }
 
 /* ============================================================

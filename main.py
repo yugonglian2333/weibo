@@ -14,6 +14,7 @@
 
 import logging
 import os
+import random
 import sys
 import time
 from datetime import datetime, timezone, timedelta
@@ -75,6 +76,31 @@ from notifier import (
     create_notifier_from_env,
     build_notification,
 )
+
+
+# AI 评论生成失败时的模板评论
+FALLBACK_COMMENTS = [
+    "说得对",
+    "支持",
+    "太棒了",
+    "加油",
+    "好帖",
+    "说得好",
+    "赞同",
+    "赞一个",
+    "有道理",
+    "厉害了",
+    "可以的",
+    "不错不错",
+    "真好",
+    "期待更新",
+    "感谢分享",
+    "爱了爱了",
+    "每天都在看",
+    "超级好看",
+    "收藏了",
+    "比心",
+]
 
 
 # ============================================================
@@ -165,6 +191,47 @@ def load_config() -> dict:
     return config
 
 
+def _save_containerid_to_config(name: str, containerid: str):
+    """将搜索到的 containerid 自动保存回 config.yaml，下次无需重复搜索"""
+    if not HAS_YAML:
+        return
+    config_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "config.yaml",
+    )
+    if not os.path.exists(config_path):
+        return
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+
+        topics = config.setdefault("checkin", {}).setdefault("topics", [])
+        updated = False
+        for t in topics:
+            if isinstance(t, dict) and t.get("name") == name:
+                if not t.get("containerid"):
+                    t["containerid"] = containerid
+                    updated = True
+                break
+        else:
+            # 话题不在签到列表中，添加进去（用于记录 containerid 映射）
+            topics.append({"name": name, "containerid": containerid})
+            updated = True
+
+        if updated:
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.dump(
+                    config, f,
+                    allow_unicode=True, default_flow_style=False, sort_keys=False,
+                )
+            logger.info(
+                f"💾 已将「{name}」的 containerid 保存到 config.yaml，下次无需重复搜索"
+            )
+    except Exception as e:
+        logger.warning(f"保存 containerid 到 config.yaml 失败: {e}")
+
+
 # ============================================================
 # 核心流程
 # ============================================================
@@ -202,6 +269,9 @@ def run_checkin(client: WeiboClient, topics: list[dict]) -> list[dict]:
                     "name": name,
                 })
                 continue
+            # 保存到 config.yaml，下次无需重复搜索
+            _save_containerid_to_config(name, containerid)
+            topic["containerid"] = containerid
             # 短暂延迟，避免请求过快
             time.sleep(1)
 
@@ -217,6 +287,146 @@ def run_checkin(client: WeiboClient, topics: list[dict]) -> list[dict]:
     success_count = sum(1 for r in results if r["success"])
     logger.info(
         f"===== 签到完成: {success_count}/{len(topics)} 成功 ====="
+    )
+
+    return results
+
+
+def run_commenting(
+    client: WeiboClient,
+    ai_provider,
+    topics: list[dict],
+    count: int = 3,
+) -> list[dict]:
+    """
+    对超话下的前 N 个帖子进行自动评论
+
+    Args:
+        client: WeiboClient 实例
+        ai_provider: AIProvider 实例（可为 None，此时只用模板评论）
+        topics: 超话列表，如 [{"name": "xxx", "containerid": "100808xxx"}, ...]
+        count: 每个超话评论的帖子数（默认 3）
+
+    Returns:
+        评论结果列表
+    """
+    if not topics:
+        logger.info("没有需要评论的超话，跳过")
+        return []
+
+    logger.info(
+        f"===== 自动评论开始（共 {len(topics)} 个超话，每个 {count} 条）====="
+    )
+    results = []
+
+    for t_idx, topic in enumerate(topics):
+        name = topic.get("name", "未知超话")
+        containerid = topic.get("containerid", "")
+
+        if not containerid:
+            logger.warning(f"「{name}」无 containerid，跳过评论")
+            continue
+
+        logger.info(
+            f"--- [{t_idx + 1}/{len(topics)}] 超话「{name}」获取帖子 ---"
+        )
+
+        # 1. 获取前 N 个帖子
+        posts = client.get_super_topic_posts(containerid, count=count)
+        if not posts:
+            logger.warning(f"「{name}」未获取到帖子，跳过评论")
+            results.append({
+                "topic": name,
+                "success": True,
+                "message": f"⏭ {name} 无帖子可评论",
+                "comments": [],
+            })
+            continue
+
+        logger.info(
+            f"「{name}」获取到 {len(posts)} 条帖子，开始评论..."
+        )
+
+        topic_comment_results = []
+
+        for p_idx, post in enumerate(posts):
+            post_mid = post.get("mid", "")
+            post_text = post.get("text", "")
+            post_user = post.get("user", "用户")
+
+            if not post_mid:
+                logger.warning(
+                    f"  帖子[{p_idx + 1}] 缺少 mid，跳过"
+                )
+                continue
+
+            logger.info(
+                f"  [{p_idx + 1}/{len(posts)}] 帖子 by @{post_user}: "
+                f"「{post_text[:40]}...」"
+            )
+
+            # 2. 生成评论（AI 优先，失败则用模板）
+            comment = ""
+            if ai_provider:
+                try:
+                    comment = ai_provider.generate_comment(
+                        post_content=post_text, topic=name
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"   AI 评论生成异常: {e}，使用模板评论"
+                    )
+                    comment = ""
+
+            if not comment:
+                comment = random.choice(FALLBACK_COMMENTS)
+                logger.info(f"   使用模板评论: 「{comment}」")
+            else:
+                logger.info(f"   AI 生成评论: 「{comment}」")
+
+            # 3. 发布评论
+            comment_result = client.comment_post(
+                post_mid=post_mid, content=comment, post_id=post.get("id", "")
+            )
+            comment_result["comment"] = comment
+            comment_result["post_user"] = post_user
+            topic_comment_results.append(comment_result)
+
+            logger.info(f"   结果: {comment_result['message']}")
+
+            # 帖子之间间隔，避免限流
+            if p_idx < len(posts) - 1:
+                time.sleep(2)
+
+        success_count = sum(
+            1 for cr in topic_comment_results if cr.get("success")
+        )
+        results.append({
+            "topic": name,
+            "success": True,
+            "message": (
+                f"「{name}」评论完成: "
+                f"{success_count}/{len(topic_comment_results)} 成功"
+            ),
+            "comments": topic_comment_results,
+        })
+
+        logger.info(f"  {results[-1]['message']}")
+
+        # 超话之间间隔
+        if t_idx < len(topics) - 1:
+            time.sleep(2)
+
+    # 汇总
+    total_comments = sum(
+        len(r.get("comments", [])) for r in results
+    )
+    total_success = sum(
+        sum(1 for cr in r.get("comments", []) if cr.get("success"))
+        for r in results
+    )
+    logger.info(
+        f"===== 评论完成: {total_success}/{total_comments} 条成功 ====="
     )
 
     return results
@@ -354,6 +564,46 @@ def main():
     checkin_topics = config.get("checkin", {}).get("topics", [])
     checkin_results = run_checkin(client, checkin_topics)
 
+    # ---- 3.5 自动评论 ----
+    commenting_config = config.get("commenting", {})
+    commenting_enabled = commenting_config.get("enabled", True)
+    commenting_count = commenting_config.get("count", 3)
+
+    comment_results = []
+    if commenting_enabled and checkin_results:
+        # 只评论签到成功的超话
+        successful_topics = [
+            {"name": r["name"], "containerid": r.get("containerid", "")}
+            for r in checkin_results
+            if r.get("success")
+        ]
+        if successful_topics:
+            logger.info(
+                f"将为 {len(successful_topics)} 个签到成功的超话进行评论"
+            )
+            try:
+                ai_for_comment = create_provider_from_env()
+                comment_results = run_commenting(
+                    client, ai_for_comment, successful_topics,
+                    count=commenting_count,
+                )
+            except ValueError as e:
+                logger.warning(
+                    f"AI Provider 初始化失败，使用模板评论: {e}"
+                )
+                comment_results = run_commenting(
+                    client, None, successful_topics,
+                    count=commenting_count,
+                )
+            except Exception as e:
+                logger.error(f"自动评论异常: {e}")
+        else:
+            logger.info("没有签到成功的超话，跳过评论")
+    elif not commenting_enabled:
+        logger.info("评论功能已禁用，跳过")
+    else:
+        logger.info("没有签到结果，跳过评论")
+
     # ---- 4. AI 发帖 ----
     posting_config = config.get("posting", {})
     posting_enabled = posting_config.get("enabled", True)
@@ -386,6 +636,8 @@ def main():
             if cid:
                 topic_to_cid[topic_name] = cid
                 logger.info(f"话题「{topic_name}」-> containerid: {cid}")
+                # 保存到 config.yaml，下次无需重复搜索
+                _save_containerid_to_config(topic_name, cid)
             else:
                 logger.warning(
                     f"未找到话题「{topic_name}」的 containerid，将发布到个人主页"
@@ -424,6 +676,16 @@ def main():
     for r in checkin_results:
         logger.info(f"签到: {r.get('name', '?')} -> {r['message']}")
 
+    for cr in comment_results:
+        logger.info(
+            f"评论 [{cr.get('topic', '?')}]: {cr.get('message', '?')}"
+        )
+        for c in cr.get("comments", []):
+            logger.info(
+                f"  @{c.get('post_user', '?')}: "
+                f"「{c.get('comment', '')[:30]}」→ {c.get('message', '?')}"
+            )
+
     for pr in post_results:
         logger.info(
             f"发帖 [{pr.get('topic', '?')}]: {pr.get('message', '?')}"
@@ -443,6 +705,15 @@ def main():
         logger.info(
             f"签到: {sum(1 for r in checkin_results if r['success'])}"
             f"/{len(checkin_results)} 成功"
+        )
+    if comment_results:
+        total_c = sum(len(r.get("comments", [])) for r in comment_results)
+        success_c = sum(
+            sum(1 for c in r.get("comments", []) if c.get("success"))
+            for r in comment_results
+        )
+        logger.info(
+            f"评论: {success_c}/{total_c} 条成功"
         )
     if post_results:
         success_count = sum(1 for pr in post_results if pr.get("success"))

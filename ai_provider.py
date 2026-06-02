@@ -46,6 +46,26 @@ class AIProvider(ABC):
         """
         ...
 
+    @abstractmethod
+    def generate_comment(
+        self,
+        post_content: str,
+        topic: str,
+        temperature: float = 0.7,
+    ) -> str:
+        """
+        根据帖子内容生成一条简短评论
+
+        Args:
+            post_content: 帖子文本内容（纯文本，已去除 HTML 标签）
+            topic: 超话名称
+            temperature: 生成随机性 (0-2)
+
+        Returns:
+            生成的评论（纯文本，建议 15-50 字）
+        """
+        ...
+
     @classmethod
     def name(cls) -> str:
         """返回 Provider 名称"""
@@ -72,6 +92,162 @@ class MimoProvider(AIProvider):
     @classmethod
     def name(cls) -> str:
         return "mimo"
+
+    def _build_comment_system_prompt(
+        self, post_content: str, topic: str
+    ) -> str:
+        """构建评论生成的系统提示词"""
+        return (
+            f"你是一个普通微博用户，正在浏览「{topic}」超话社区的帖子。\n"
+            f"请根据下面帖子的内容，写一条简短评论回复。\n"
+            f"\n"
+            f"帖子内容：{post_content}\n"
+            f"\n"
+            f"要求：\n"
+            f"1. 不超过50个字\n"
+            f"2. 内容与帖子内容相关，表达认同、赞美或简单互动\n"
+            f"3. 语气自然亲切，像普通用户的真实评论\n"
+            f"4. 不要换行\n"
+            f"5. 不要说「评论如下」之类的前缀\n"
+            f"6. 不要使用 # 话题标签\n"
+            f"\n"
+            f"输出格式：直接输出评论内容，不要任何前缀或引号"
+        )
+
+    def generate_comment(
+        self,
+        post_content: str,
+        topic: str,
+        temperature: float = 0.7,
+    ) -> str:
+        """调用 Mimo API 生成简短评论"""
+        system_prompt = self._build_comment_system_prompt(
+            post_content, topic
+        )
+
+        is_anthropic = self.api_base.endswith("/anthropic")
+
+        protocols = []
+        if is_anthropic:
+            openai_base = self.api_base.replace("/anthropic", "/v1")
+            protocols.append({
+                "name": "OpenAI",
+                "url": f"{openai_base}/chat/completions",
+                "payload": {
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "user",
+                            "content": "请写一条简短的评论",
+                        },
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": 128,
+                },
+                "is_anthropic": False,
+            })
+            protocols.append({
+                "name": "Anthropic(备选)",
+                "url": f"{self.api_base}/messages",
+                "payload": {
+                    "model": self.model,
+                    "max_tokens": 128,
+                    "temperature": temperature,
+                    "system": system_prompt,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "请写一条简短的评论",
+                        },
+                    ],
+                },
+                "is_anthropic": True,
+            })
+        else:
+            protocols.append({
+                "name": "OpenAI",
+                "url": f"{self.api_base}/chat/completions",
+                "payload": {
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "user",
+                            "content": "请写一条简短的评论",
+                        },
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": 128,
+                },
+                "is_anthropic": False,
+            })
+
+        last_error = None
+        for proto in protocols:
+            try:
+                resp = requests.post(
+                    proto["url"],
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=proto["payload"],
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                if proto["is_anthropic"]:
+                    content = (
+                        data.get("content", [{}])[0]
+                        .get("text", "")
+                        .strip()
+                    )
+                else:
+                    content = (
+                        data.get("choices", [{}])[0]
+                        .get("message", {})
+                        .get("content", "")
+                        .strip()
+                    )
+
+                if content:
+                    logger.info(
+                        f"Mimo 评论生成成功，长度: {len(content)} 字"
+                    )
+                    return content
+                logger.warning("Mimo 评论生成返回空内容")
+                return ""
+
+            except requests.RequestException as e:
+                last_error = e
+                status = None
+                try:
+                    if e.response is not None:
+                        status = e.response.status_code
+                except Exception:
+                    pass
+                if status == 404:
+                    logger.warning(
+                        f"{proto['name']} 协议 404，尝试备选..."
+                    )
+                    continue
+                break
+
+        status_msg = ""
+        if last_error is not None:
+            try:
+                if last_error.response is not None:
+                    status_msg = (
+                        f" | status={last_error.response.status_code}"
+                    )
+            except Exception:
+                pass
+        logger.warning(
+            f"Mimo 评论生成失败: {last_error}{status_msg}"
+        )
+        return ""
 
     def generate_post(
         self,
@@ -269,6 +445,75 @@ class ClaudeProvider(AIProvider):
     def name(cls) -> str:
         return "claude"
 
+    def _build_comment_system_prompt(
+        self, post_content: str, topic: str
+    ) -> str:
+        """构建评论生成的系统提示词"""
+        return (
+            f"你是一个普通微博用户，正在浏览「{topic}」超话社区的帖子。\n"
+            f"请根据下面帖子的内容，写一条简短评论回复。\n"
+            f"\n"
+            f"帖子内容：{post_content}\n"
+            f"\n"
+            f"要求：\n"
+            f"1. 不超过50个字\n"
+            f"2. 内容与帖子内容相关，表达认同、赞美或简单互动\n"
+            f"3. 语气自然亲切，像普通用户的真实评论\n"
+            f"4. 不要换行\n"
+            f"5. 不要说「评论如下」之类的前缀\n"
+            f"6. 不要使用 # 话题标签\n"
+            f"\n"
+            f"输出格式：直接输出评论内容，不要任何前缀或引号"
+        )
+
+    def generate_comment(
+        self,
+        post_content: str,
+        topic: str,
+        temperature: float = 0.7,
+    ) -> str:
+        """调用 Claude API 生成简短评论"""
+        system_prompt = self._build_comment_system_prompt(
+            post_content, topic
+        )
+
+        try:
+            from anthropic import Anthropic
+
+            client = Anthropic(api_key=self.api_key)
+            message = client.messages.create(
+                model=self.model,
+                max_tokens=128,
+                temperature=temperature,
+                system=system_prompt,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "请写一条简短的评论",
+                    }
+                ],
+            )
+
+            content = message.content[0].text.strip()
+
+            if content:
+                logger.info(
+                    f"Claude 评论生成成功，长度: {len(content)} 字"
+                )
+                return content
+            else:
+                logger.warning("Claude 评论生成返回空内容")
+                return ""
+
+        except ImportError:
+            logger.error(
+                "需要安装 anthropic SDK: pip install anthropic"
+            )
+            return ""
+        except Exception as e:
+            logger.error(f"Claude 评论生成失败: {e}")
+            return ""
+
     def generate_post(
         self,
         topics: list[str],
@@ -359,6 +604,92 @@ class OpenAIProvider(AIProvider):
     @classmethod
     def name(cls) -> str:
         return "openai"
+
+    def _build_comment_system_prompt(
+        self, post_content: str, topic: str
+    ) -> str:
+        """构建评论生成的系统提示词"""
+        return (
+            f"你是一个普通微博用户，正在浏览「{topic}」超话社区的帖子。\n"
+            f"请根据下面帖子的内容，写一条简短评论回复。\n"
+            f"\n"
+            f"帖子内容：{post_content}\n"
+            f"\n"
+            f"要求：\n"
+            f"1. 不超过50个字\n"
+            f"2. 内容与帖子内容相关，表达认同、赞美或简单互动\n"
+            f"3. 语气自然亲切，像普通用户的真实评论\n"
+            f"4. 不要换行\n"
+            f"5. 不要说「评论如下」之类的前缀\n"
+            f"6. 不要使用 # 话题标签\n"
+            f"\n"
+            f"输出格式：直接输出评论内容，不要任何前缀或引号"
+        )
+
+    def generate_comment(
+        self,
+        post_content: str,
+        topic: str,
+        temperature: float = 0.7,
+    ) -> str:
+        """调用 OpenAI API 生成简短评论"""
+        system_prompt = self._build_comment_system_prompt(
+            post_content, topic
+        )
+
+        try:
+            resp = requests.post(
+                f"{self.api_base}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "user",
+                            "content": "请写一条简短的评论",
+                        },
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": 128,
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            content = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+
+            if content:
+                logger.info(
+                    f"OpenAI 评论生成成功，长度: {len(content)} 字"
+                )
+                return content
+            else:
+                logger.warning("OpenAI 评论生成返回空内容")
+                return ""
+
+        except requests.RequestException as e:
+            status = (
+                getattr(e.response, "status_code", "N/A")
+                if hasattr(e, "response") and e.response
+                else "N/A"
+            )
+            logger.error(
+                f"OpenAI 评论生成失败: {e} | status={status}"
+            )
+            return ""
+        except (KeyError, IndexError, ValueError) as e:
+            logger.error(f"OpenAI 评论生成响应解析失败: {e}")
+            return ""
 
     def generate_post(
         self,
