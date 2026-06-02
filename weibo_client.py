@@ -33,9 +33,9 @@ class WeiboClient:
 
     def _setup_session(self):
         """配置请求会话，设置 Cookie 和通用请求头"""
-        self.session.cookies.update(
-            self._parse_cookie_string(self.cookie)
-        )
+        cookie_dict = self._parse_cookie_string(self.cookie)
+        logger.info(f"解析到 {len(cookie_dict)} 个 Cookie 字段: {list(cookie_dict.keys())}")
+        self.session.cookies.update(cookie_dict)
         self.session.headers.update({
             "User-Agent": (
                 "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) "
@@ -113,7 +113,11 @@ class WeiboClient:
         url = f"{self.API_BASE}/config"
         data = self._request("GET", url)
         if data is None:
+            logger.error("请求 /api/config 失败，无法确认登录态")
             return False
+
+        # 打印完整响应用于调试
+        logger.info(f"/api/config 响应: {data}")
 
         # 如果返回了用户信息，说明已登录
         if data.get("data", {}).get("login"):
@@ -122,6 +126,11 @@ class WeiboClient:
             return True
 
         logger.warning("Cookie 已过期或无效，请重新获取")
+        logger.warning(
+            f"响应详情 — ok={data.get('ok')}, "
+            f"login={data.get('data', {}).get('login')}, "
+            f"msg={data.get('msg', '无')}"
+        )
         return False
 
     def get_containerid_by_name(self, name: str) -> Optional[str]:
