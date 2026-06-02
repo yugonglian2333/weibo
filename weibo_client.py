@@ -702,7 +702,10 @@ class WeiboClient:
         但 Playwright 的 page.request（APIRequestContext）使用浏览器级
         HTTP 栈（TLS 指纹 + Cookie 共享），可以绕过反爬，正常拿到 JSON。
 
-        先尝试 PC 端 AJAX API，失败则回退到移动端 m.weibo.cn API。
+        三级回退策略：
+        1. PC 端超话 API (ajax_proxy/chaohua/page)  —— 实测有效，主力方案
+        2. 导航到超话页面，从 article DOM 中提取
+        3. 移动端 API 作为最后手段
         """
         posts = []
 
@@ -716,15 +719,25 @@ class WeiboClient:
         try:
             import json as _json
 
-            # — 方案 1: PC 端 AJAX API（最佳性能）—
-            logger.info("尝试 PC 端 AJAX API 获取帖子...")
             topic_url = (
                 f"https://weibo.com/p/{containerid}/super_index"
             )
-            feed_api = "https://weibo.com/ajax/statuses/topicFeed"
+
+            # — 方案 1: PC 端超话 API（实际页面使用的接口，实测有效）—
+            logger.info("尝试 PC 端超话 API (ajax_proxy/chaohua/page)...")
+
+            # 先导航到超话页面，让浏览器建立正确的会话上下文
+            page.goto(
+                topic_url,
+                wait_until="domcontentloaded",
+                timeout=30000,
+            )
+            page.wait_for_timeout(3000)
+
+            chaohua_api = "https://weibo.com/ajax_proxy/chaohua/page"
             api_resp = page.request.get(
-                feed_api,
-                params={"containerid": containerid, "page": 1},
+                chaohua_api,
+                params={"flowId": containerid},
                 headers={
                     "X-Requested-With": "XMLHttpRequest",
                     "Accept": "application/json, text/plain, */*",
@@ -738,39 +751,128 @@ class WeiboClient:
                 except Exception:
                     data = None
 
-                if data and data.get("ok") == 1:
-                    statuses = (
-                        data.get("data", {}).get("statuses", [])
-                    )
-                    for s in statuses:
-                        text_raw = s.get("text_raw", "") or s.get("text", "")
+                if data:
+                    # 该 API 返回 {"items": [...]}，每个 item 有 category 字段
+                    # 帖子对应的 item category 为 "feed"
+                    items = data.get("items", [])
+                    for item in items:
+                        if item.get("category") != "feed":
+                            continue
+                        d = item.get("data", {})
+                        if not d:
+                            continue
+                        text_raw = d.get("text_raw", "") or d.get("text", "")
                         text_clean = re.sub(
                             r"<[^>]*>", "", text_raw
                         ).strip()[:200]
                         posts.append({
-                            "id": s.get("id", ""),
-                            "mid": s.get("mid", ""),
+                            "id": str(d.get("id", "")),
+                            "mid": str(d.get("mid", "")),
                             "text": text_clean,
-                            "user": s.get("user", {}).get("screen_name", ""),
+                            "user": d.get("user", {}).get("screen_name", ""),
                         })
                         if len(posts) >= count:
                             break
+
                     if posts:
                         logger.info(
-                            f"PC 端 AJAX API 获取到 {len(posts)} 条帖子"
+                            f"PC 端超话 API 获取到 {len(posts)} 条帖子"
+                        )
+                    else:
+                        logger.info(
+                            f"PC 端超话 API: items={len(items)}, "
+                            f"但未找到 feed 类目"
                         )
                 else:
-                    ok_val = data.get("ok") if data else "N/A"
-                    logger.info(f"PC 端 AJAX API: ok={ok_val}")
+                    logger.info("PC 端超话 API: 响应解析失败")
             else:
                 logger.info(
-                    f"PC 端 AJAX API: HTTP {api_resp.status}"
+                    f"PC 端超话 API: HTTP {api_resp.status}"
                 )
 
-            # — 方案 2: Playwright 调移动端 API（绕过反爬的关键）—
+            # — 方案 2: 导航到超话页面，从 article DOM 提取 —
+            # PC 端页面不使用 [mid] 属性，帖子在 <article> 元素中
+            # 但 mid 可以从 article 内部的链接中提取
             if not posts:
                 logger.info(
-                    "PC 端 API 失败，用 Playwright 调移动端 API..."
+                    "API 方案失败，从超话页面 article DOM 提取..."
+                )
+                # 如果之前没导航到页面（方案 1 没执行到），现在导航
+                if "super_index" not in page.url:
+                    page.goto(
+                        topic_url,
+                        wait_until="networkidle",
+                        timeout=30000,
+                    )
+                    page.wait_for_timeout(3000)
+                else:
+                    # 已在方案 1 中导航过，等 JS 完全渲染
+                    page.wait_for_timeout(3000)
+
+                logger.info(
+                    f"超话页面: title={page.title()}, "
+                    f"url={page.url[:120]}"
+                )
+
+                # 从 article 元素中提取帖子 mid 和文本
+                dom_posts = page.evaluate("""() => {
+                    var results = [];
+                    var articles = document.querySelectorAll('article');
+                    for (var i = 0; i < articles.length; i++) {
+                        var art = articles[i];
+                        var text = (art.textContent || '')
+                            .trim().substring(0, 200);
+
+                        // 尝试从链接提取 mid: /detail/{mid}
+                        var mid = '';
+                        var links = art.querySelectorAll('a[href*="/detail/"]');
+                        for (var l of links) {
+                            var m = l.href.match(/\\/detail\\/([A-Za-z0-9]+)/);
+                            if (m) { mid = m[1]; break; }
+                        }
+
+                        // 回退：尝试 data/mid 属性
+                        if (!mid) {
+                            var attrs = ['mid', 'data-mid', 'data-id', 'action-data'];
+                            for (var a of attrs) {
+                                var val = art.getAttribute(a);
+                                if (val) {
+                                    var dm = val.match(/mid=(\\d{10,})/);
+                                    if (dm) { mid = dm[1]; break; }
+                                    if (/^\\d{10,}$/.test(val)) {
+                                        mid = val; break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (text) {
+                            results.push({mid: mid, text: text});
+                        }
+                        if (results.length >= 10) break;
+                    }
+                    return results;
+                }""")
+                for dp in dom_posts[:count]:
+                    posts.append({
+                        "id": dp.get("mid", ""),
+                        "mid": dp.get("mid", ""),
+                        "text": dp.get("text", ""),
+                        "user": "",
+                    })
+                if posts:
+                    logger.info(
+                        f"DOM (article) 提取到 {len(posts)} 条帖子"
+                    )
+                else:
+                    logger.info(
+                        f"DOM 提取失败，article 元素数={len(dom_posts)}"
+                    )
+
+            # — 方案 3: 回退到移动端 API —
+            if not posts:
+                logger.info(
+                    "PC 端方案均失败，尝试移动端 API..."
                 )
                 mobile_url = (
                     f"{self.API_BASE}/container/getIndex"
@@ -849,54 +951,6 @@ class WeiboClient:
                 else:
                     logger.info(
                         f"移动端 API: HTTP {mobile_resp.status}"
-                    )
-
-            # — 方案 3: 导航到超话页面，从 DOM 提取 —
-            if not posts:
-                logger.info(
-                    "API 方案均失败，导航到超话页面从 DOM 提取..."
-                )
-                page.goto(
-                    topic_url,
-                    wait_until="networkidle",
-                    timeout=30000,
-                )
-                page.wait_for_timeout(3000)
-
-                # 打印页面标题和 URL 用于调试
-                logger.info(
-                    f"超话页面: title={page.title()}, "
-                    f"url={page.url[:120]}"
-                )
-
-                dom_posts = page.evaluate("""() => {
-                    var results = [];
-                    // 遍历所有带 mid 属性的元素
-                    var all = document.querySelectorAll('[mid]');
-                    var seen = {};
-                    for (var i = 0; i < all.length; i++) {
-                        var el = all[i];
-                        var mid = el.getAttribute('mid');
-                        if (mid && !seen[mid] && /^\\d{10,}$/.test(mid)) {
-                            seen[mid] = true;
-                            var text = (el.textContent || '')
-                                .trim().substring(0, 200);
-                            results.push({mid: mid, text: text});
-                        }
-                        if (results.length >= 10) break;
-                    }
-                    return results;
-                }""")
-                for dp in dom_posts[:count]:
-                    posts.append({
-                        "id": dp.get("mid", ""),
-                        "mid": dp.get("mid", ""),
-                        "text": dp.get("text", ""),
-                        "user": "",
-                    })
-                if posts:
-                    logger.info(
-                        f"DOM 提取到 {len(posts)} 条帖子"
                     )
 
         except Exception as e:
@@ -995,6 +1049,12 @@ class WeiboClient:
         """
         使用 Playwright 浏览器在 PC 端评论
         复用签到时的浏览器上下文
+
+        PC 端真实评论 API:
+        POST https://weibo.com/ajax/comments/create
+        form: id={post_mid}&comment={content}&pic_id=&is_repost=0&
+              comment_ori=0&is_comment=0
+        header: x-xsrf-token={st}
         """
         result = {"success": False, "message": ""}
 
@@ -1010,24 +1070,26 @@ class WeiboClient:
         page = context.new_page()
 
         try:
-            comment_url = "https://weibo.com/aj/v6/comment/add"
+            # 使用真实有效的 PC 端评论 API（非 aj/v6/comment/add）
+            comment_url = "https://weibo.com/ajax/comments/create"
             api_resp = page.request.post(
                 comment_url,
                 headers={
                     "X-Requested-With": "XMLHttpRequest",
-                    "Accept": (
-                        "application/json, text/javascript, */*; q=0.01"
-                    ),
+                    "Accept": "application/json, text/plain, */*",
                     "Content-Type": (
-                        "application/x-www-form-urlencoded; charset=UTF-8"
+                        "application/x-www-form-urlencoded"
                     ),
+                    "x-xsrf-token": st,
                     "Referer": f"https://weibo.com/{post_mid}",
                 },
                 form={
-                    "mid": post_mid,
-                    "content": content,
-                    "st": st,
-                    "_t": "0",
+                    "id": post_mid,
+                    "comment": content,
+                    "pic_id": "",
+                    "is_repost": "0",
+                    "comment_ori": "0",
+                    "is_comment": "0",
                 },
             )
 
@@ -1046,16 +1108,18 @@ class WeiboClient:
                 logger.warning(result["message"])
                 return result
 
-            code = str(data.get("code", ""))
-            if code == "100000":
+            # 新的 API 返回 {"ok": 1} 表示成功
+            if data.get("ok") == 1:
                 result["success"] = True
                 result["message"] = (
                     f"✅ 评论成功（PC端）: {content[:30]}..."
                 )
             else:
                 msg = data.get("msg", "")
+                code = data.get("code", "")
                 result["message"] = (
-                    f"❌ 评论失败（PC端）: {msg} (code={code})"
+                    f"❌ 评论失败（PC端）: {msg}"
+                    f"{' (code=' + str(code) + ')' if code else ''}"
                 )
 
             logger.info(result["message"])
