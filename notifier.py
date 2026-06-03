@@ -284,19 +284,79 @@ def build_notification(
     checkin_results: list[dict],
     post_results: Optional[list[dict]] = None,
     comment_results: Optional[list[dict]] = None,
+    fudai_results: Optional[dict] = None,
 ) -> tuple[str, str]:
     """
-    根据签到、评论和发帖结果构建通知标题和内容
+    根据签到、评论、发帖和福袋结果构建通知标题和内容
 
     Args:
         checkin_results: 签到结果列表
         post_results: 发帖结果列表（可为 None 或空列表）
         comment_results: 评论结果列表（可为 None 或空列表）
+        fudai_results: 福袋任务结果（可为 None）
 
     Returns:
         (title, content) 元组
     """
     lines = []
+
+    # ---- 福袋报告（放在最前面） ----
+    if fudai_results:
+        fudai_summary = fudai_results.get("summary", {})
+        fudai_topics = fudai_results.get("topics", [])
+
+        lines.append("🎁 周三福袋任务报告")
+        lines.append("━━━━━━━━━━━━━━")
+
+        if fudai_summary:
+            total = fudai_summary.get("total", 0)
+            ck_ok = fudai_summary.get("checkin_success", 0)
+            cs_ok = fudai_summary.get("consume_success", 0)
+            pt_ok = fudai_summary.get("post_success", 0)
+            ia_ok = fudai_summary.get("interact_success", 0)
+
+            lines.append(
+                f"🎫 签到福袋: {ck_ok}/{total} "
+                f"{'✅' if ck_ok == total else '⚠️'}"
+            )
+            lines.append(
+                f"📖 消费福袋: {cs_ok}/{total} "
+                f"{'✅' if cs_ok == total else '⚠️'}"
+            )
+            lines.append(
+                f"📝 发帖福袋: {pt_ok}/{total} "
+                f"{'✅' if pt_ok == total else '⚠️'}"
+            )
+            lines.append(
+                f"💬 互动福袋: {ia_ok}/{total} "
+                f"{'✅' if ia_ok == total else '⚠️'}"
+            )
+
+        # 详细列出每个超话
+        for tr in fudai_topics:
+            topic = tr.get("topic", "未知")
+            error = tr.get("error", "")
+            if error:
+                lines.append(f"  ❌ {topic}: {error}")
+                continue
+            ck = "✅" if (tr.get("checkin") or {}).get("success") else "❌"
+            cs = "✅" if (tr.get("consume") or {}).get("success") else "❌"
+            pt = "✅" if (tr.get("post") or {}).get("success") else "❌"
+            ia = "✅" if (tr.get("interact") or {}).get("success") else "❌"
+            ia_method = (tr.get("interact") or {}).get("method", "")
+            ia_label = {
+                "comment": "评",
+                "repost": "转",
+                "none": "-",
+            }.get(ia_method, ia_method)
+            lines.append(
+                f"  {topic}: 签到{ck} 消费{cs} 发帖{pt} 互动({ia_label}){ia}"
+            )
+
+        lines.append("━━━━━━━━━━━━━━")
+        lines.append("")
+
+    # ---- 常规报告 ----
     lines.append("📋 微博签到发帖报告")
     lines.append("━━━━━━━━━━━━━━")
 
@@ -386,7 +446,18 @@ def build_notification(
         t = len(post_results)
         title_parts.append(f"发帖({s}/{t})")
 
-    if title_parts:
+    # 标题：优先使用福袋标题
+    if fudai_results:
+        fudai_summary = fudai_results.get("summary", {})
+        total = fudai_summary.get("total", 0)
+        ck = fudai_summary.get("checkin_success", 0)
+        cs = fudai_summary.get("consume_success", 0)
+        pt = fudai_summary.get("post_success", 0)
+        ia = fudai_summary.get("interact_success", 0)
+        all_good = (ck == total and cs == total and pt == total and ia == total)
+        status = "✅" if all_good else "⚠️"
+        title = f"{status} 周三福袋 签到{ck}/{total} 发帖{pt}/{total} 互动{ia}/{total}"
+    elif title_parts:
         title = "微博 " + "，".join(title_parts)
     else:
         title = "微博执行完成"

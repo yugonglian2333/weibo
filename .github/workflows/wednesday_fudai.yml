@@ -1,0 +1,41 @@
+name: 微博周三福袋任务
+
+on:
+  schedule:
+    # 每周三 UTC 0:00 执行（= 北京时间 8:00）
+    # 福袋每周三全天开放（6:00-23:00），上午执行确保任务完成
+    - cron: '0 0 * * 3'
+
+  # 支持手动触发（在 GitHub Actions 页面点按钮）
+  workflow_dispatch:
+
+jobs:
+  weibo-fudai:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装 Python 依赖
+        run: pip install -r requirements.txt
+
+      - name: 安装 Playwright 浏览器（含系统依赖）
+        run: playwright install chromium --with-deps
+
+      - name: 执行微博周三福袋任务
+        env:
+          WEIBO_COOKIE: ${{ secrets.WEIBO_COOKIE }}
+          AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_API_BASE: ${{ secrets.AI_API_BASE }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+          NOTIFY_PROVIDER: ${{ secrets.NOTIFY_PROVIDER }}
+          NOTIFY_TOKEN: ${{ secrets.NOTIFY_TOKEN }}
+          NOTIFY_CHAT_ID: ${{ secrets.NOTIFY_CHAT_ID }}
+        run: python main.py --fudai

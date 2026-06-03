@@ -153,12 +153,13 @@ _WeiboClient = None
 _create_provider_from_env = None
 _create_notifier_from_env = None
 _build_notification = None
+_run_fudai = None
 
 
 def _ensure_modules():
     """确保项目模块已加载（只执行一次）"""
     global _modules_loaded, _WeiboClient, _create_provider_from_env
-    global _create_notifier_from_env, _build_notification
+    global _create_notifier_from_env, _build_notification, _run_fudai
 
     if _modules_loaded:
         return
@@ -172,11 +173,13 @@ def _ensure_modules():
     from weibo_client import WeiboClient as _WC
     from ai_provider import create_provider_from_env as _cpfe
     from notifier import create_notifier_from_env as _cnfe, build_notification as _bn
+    from main import run_fudai as _rf
 
     _WeiboClient = _WC
     _create_provider_from_env = _cpfe
     _create_notifier_from_env = _cnfe
     _build_notification = _bn
+    _run_fudai = _rf
     _modules_loaded = True
 
     logger.info("项目模块加载完成")
@@ -395,6 +398,104 @@ def run_full_flow() -> dict:
         client.cleanup()
 
 
+def run_fudai_flow():
+    """执行周三福袋任务（后台线程）"""
+    import time as time_mod
+
+    logger.info("=" * 50)
+    logger.info("🎁 周三福袋任务 启动")
+    logger.info("=" * 50)
+
+    env = read_env()
+    cookie = os.environ.get("WEIBO_COOKIE", "") or env.get("WEIBO_COOKIE", "")
+    if not cookie:
+        logger.error("未设置 WEIBO_COOKIE，无法继续")
+        return
+
+    for k, v in env.items():
+        if k not in os.environ:
+            os.environ[k] = v
+
+    config = read_yaml()
+    _ensure_modules()
+
+    logger.info("初始化微博客户端...")
+    client = _WeiboClient(cookie)
+
+    if not client.check_session_valid():
+        logger.error("Cookie 已失效，请重新获取")
+        client.cleanup()
+        return
+
+    try:
+        fudai_config = config.get("fudai", {})
+        if not fudai_config.get("enabled", True):
+            logger.info("[福袋] 福袋功能已禁用")
+            return
+
+        fudai_topics = fudai_config.get("topics", [])
+        if not fudai_topics:
+            fudai_topics = [
+                t.get("name", "")
+                for t in config.get("checkin", {}).get("topics", [])
+                if t.get("name")
+            ]
+            if not fudai_topics:
+                logger.warning("[福袋] 没有可用的福袋话题")
+                return
+
+        # 解析 containerid 映射
+        checkin_topics = config.get("checkin", {}).get("topics", [])
+        topic_to_cid = {}
+        for topic_name in fudai_topics:
+            for ct in checkin_topics:
+                if ct.get("name") == topic_name and ct.get("containerid"):
+                    topic_to_cid[topic_name] = ct["containerid"]
+                    break
+
+        # 搜索未找到 containerid 的话题
+        for topic_name in fudai_topics:
+            if topic_name in topic_to_cid:
+                continue
+            cid = client.get_containerid_by_name(topic_name) or ""
+            if cid:
+                topic_to_cid[topic_name] = cid
+                _save_containerid_to_checkin(topic_name, cid)
+            time_mod.sleep(1)
+
+        # 初始化 AI Provider
+        ai = None
+        try:
+            ai = _create_provider_from_env()
+        except Exception as e:
+            logger.warning(f"[福袋] AI Provider 初始化失败: {e}")
+
+        # 调用 run_fudai
+        fudai_results = _run_fudai(client, ai, fudai_config, topic_to_cid)
+
+        # 通知
+        if config.get("notification", {}).get("enabled", True):
+            try:
+                notifier = _create_notifier_from_env()
+                if notifier:
+                    title, content = _build_notification(
+                        [], [], [], fudai_results=fudai_results
+                    )
+                    notifier.send(title, content)
+                    logger.info("福袋通知已发送")
+            except Exception as e:
+                logger.warning(f"福袋通知异常: {e}")
+
+        logger.info("=" * 50)
+        logger.info("🎁 周三福袋任务 结束")
+        logger.info("=" * 50)
+
+    except Exception as e:
+        logger.error(f"福袋任务异常: {e}")
+    finally:
+        client.cleanup()
+
+
 def search_containerid(name: str) -> dict:
     """搜索超话 containerid（复用 weibo_client 的统一实现）"""
     env = read_env()
@@ -556,6 +657,7 @@ class AdminHandler(SimpleHTTPRequestHandler):
             "/api/checkin/run":     lambda: self._checkin(body),
             "/api/posting/run":     lambda: self._posting(body),
             "/api/run-all":         lambda: self._run_all(),
+            "/api/fudai/run":       lambda: self._fudai(),
             "/api/containerid":     lambda: self._search_cid(body),
             "/api/cookie/fetch":    lambda: self._fetch_cookie(),
             "/api/cookie/save":     lambda: self._save_cookie(body),
@@ -666,6 +768,11 @@ class AdminHandler(SimpleHTTPRequestHandler):
         logger.info("手动触发完整执行流程")
         threading.Thread(target=run_full_flow, daemon=True).start()
         self._send_json({"ok": True, "message": "已在后台启动，请查看日志"})
+
+    def _fudai(self):
+        logger.info("手动触发福袋任务")
+        threading.Thread(target=run_fudai_flow, daemon=True).start()
+        self._send_json({"ok": True, "message": "福袋任务已在后台启动，请查看日志"})
 
     # ---- API: 容器ID查询 ----
     def _search_cid(self, data: dict):

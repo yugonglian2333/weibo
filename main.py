@@ -536,6 +536,327 @@ def run_posting(
 
 
 # ============================================================
+# 福袋任务
+# ============================================================
+
+def run_fudai(
+    client: WeiboClient,
+    ai_provider,
+    fudai_config: dict,
+    topic_to_cid: dict[str, str],
+) -> dict:
+    """
+    执行周三福袋任务：按官方文档的 4 种福袋类型编排
+
+    福袋类型:
+      1. 🎫 签到福袋 — 超话签到
+      2. 📖 消费福袋 — 浏览超话内容（get_super_topic_posts）
+      3. 📝 发帖福袋 — AI 生成内容后发帖到超话
+      4. 💬 互动福袋 — 评论帖子（优先）或转发帖子（备选）
+
+    Returns:
+        {
+            "topics": [...],  # 每个超话的详细结果
+            "summary": {...},  # 汇总统计
+        }
+    """
+    topics = fudai_config.get("topics", [])
+    if not topics:
+        logger.info("[福袋] 没有配置福袋话题，跳过")
+        return {"topics": [], "summary": {}}
+
+    checkin_enabled = fudai_config.get("checkin_enabled", True)
+    post_enabled = fudai_config.get("post_enabled", True)
+    comment_enabled = fudai_config.get("comment_enabled", True)
+    repost_enabled = fudai_config.get("repost_enabled", False)
+    post_style = fudai_config.get("post_style", "自然随性")
+    post_min_words = fudai_config.get("post_min_words", 50)
+    post_max_words = fudai_config.get("post_max_words", 200)
+
+    # 转发语模板
+    FUDAI_REPOST_TEMPLATES = [
+        "转发微博",
+        "来看看这个",
+        "说得真好",
+        "分享",
+        "Mark一下",
+    ]
+
+    logger.info("=" * 50)
+    logger.info("🎁 周三福袋任务 启动")
+    logger.info(f"   话题: {', '.join(topics)}")
+    logger.info(f"   签到福袋: {'✅' if checkin_enabled else '❌'}")
+    logger.info(f"   发帖福袋: {'✅' if post_enabled else '❌'}")
+    logger.info(
+        f"   互动福袋: 评论{'✅' if comment_enabled else '❌'} "
+        f"| 转发{'✅' if repost_enabled else '❌'}"
+    )
+    logger.info("=" * 50)
+
+    topic_results = []
+
+    for t_idx, topic_name in enumerate(topics):
+        logger.info(f"===== [{t_idx + 1}/{len(topics)}] 超话「{topic_name}」福袋任务 =====")
+
+        containerid = topic_to_cid.get(topic_name, "")
+        if not containerid:
+            logger.warning(
+                f"[福袋] 「{topic_name}」无 containerid，"
+                f"尝试搜索..."
+            )
+            containerid = client.get_containerid_by_name(topic_name)
+            if not containerid:
+                topic_results.append({
+                    "topic": topic_name,
+                    "containerid": "",
+                    "checkin": None,
+                    "consume": None,
+                    "post": None,
+                    "interact": None,
+                    "error": f"未找到超话「{topic_name}」",
+                })
+                continue
+            _save_containerid_to_config(topic_name, containerid)
+            time.sleep(1)
+
+        t_result = {
+            "topic": topic_name,
+            "containerid": containerid,
+            "checkin": None,
+            "consume": None,
+            "post": None,
+            "interact": None,
+            "error": "",
+        }
+
+        # ---- 1. 🎫 签到福袋 ----
+        if checkin_enabled:
+            logger.info(f"[福袋-签到] 「{topic_name}」签到中...")
+            t_result["checkin"] = client.checkin_super_topic(
+                containerid, topic_name=topic_name
+            )
+            logger.info(
+                f"[福袋-签到] 结果: {t_result['checkin']['message']}"
+            )
+            time.sleep(2)
+
+        # ---- 2. 📖 消费福袋 —— 浏览超话内容 ----
+        logger.info(f"[福袋-消费] 「{topic_name}」浏览超话内容...")
+        posts = client.get_super_topic_posts(containerid, count=5)
+        if posts:
+            t_result["consume"] = {
+                "success": True,
+                "message": f"✅ 浏览超话成功，获取到 {len(posts)} 条帖子",
+                "posts": posts,
+            }
+        else:
+            t_result["consume"] = {
+                "success": False,
+                "message": f"⚠️ 未能获取「{topic_name}」帖子",
+                "posts": [],
+            }
+        logger.info(f"[福袋-消费] 结果: {t_result['consume']['message']}")
+        time.sleep(2)
+
+        # ---- 3. 📝 发帖福袋 ----
+        if post_enabled and ai_provider:
+            logger.info(
+                f"[福袋-发帖] 「{topic_name}」AI 生成内容..."
+            )
+            try:
+                content = ai_provider.generate_post(
+                    topics=[topic_name],
+                    style=post_style,
+                    min_words=post_min_words,
+                    max_words=post_max_words,
+                    temperature=0.9,
+                    max_tokens=4096,
+                )
+                if content:
+                    logger.info(
+                        f"[福袋-发帖] AI 生成完成，正在发布..."
+                    )
+                    post_result = client.post_weibo(
+                        content, containerid=containerid
+                    )
+                    post_result["content"] = content
+                    t_result["post"] = post_result
+                    logger.info(
+                        f"[福袋-发帖] 结果: {post_result['message']}"
+                    )
+                else:
+                    t_result["post"] = {
+                        "success": False,
+                        "message": "AI 内容生成失败",
+                        "content": "",
+                        "weibo_id": "",
+                    }
+                    logger.warning("[福袋-发帖] AI 生成内容为空")
+            except Exception as e:
+                t_result["post"] = {
+                    "success": False,
+                    "message": f"发帖异常: {e}",
+                    "content": "",
+                    "weibo_id": "",
+                }
+                logger.error(f"[福袋-发帖] 异常: {e}")
+            time.sleep(3)
+        elif post_enabled and not ai_provider:
+            t_result["post"] = {
+                "success": False,
+                "message": "AI Provider 未初始化，跳开发帖",
+                "content": "",
+                "weibo_id": "",
+            }
+            logger.warning("[福袋-发帖] AI Provider 未初始化")
+        else:
+            logger.info("[福袋-发帖] 已禁用，跳过")
+
+        # ---- 4. 💬 互动福袋 —— 评论或转发 ----
+        interact_done = False
+
+        # 获取可用的帖子列表（排除自己刚发的）
+        target_posts = posts
+        if t_result.get("post") and t_result["post"].get("weibo_id"):
+            own_wid = str(t_result["post"]["weibo_id"])
+            target_posts = [
+                p for p in posts
+                if str(p.get("id", "")) != own_wid
+                and str(p.get("mid", "")) != own_wid
+            ]
+
+        # 4a. 优先用评论
+        if comment_enabled and target_posts:
+            logger.info(
+                f"[福袋-互动] 「{topic_name}」评论帖子（共{len(target_posts)}个候选）..."
+            )
+            first_post = target_posts[0]
+            post_mid = first_post.get("mid", "")
+            post_text = first_post.get("text", "")
+
+            # 生成评论内容
+            comment_content = ""
+            if ai_provider:
+                try:
+                    comment_content = ai_provider.generate_comment(
+                        post_content=post_text, topic=topic_name
+                    )
+                except Exception:
+                    comment_content = ""
+            if not comment_content:
+                comment_content = random.choice(FALLBACK_COMMENTS)
+
+            t_result["interact"] = client.comment_post(
+                post_mid=post_mid,
+                content=comment_content,
+                post_id=first_post.get("id", ""),
+            )
+            t_result["interact"]["method"] = "comment"
+            t_result["interact"]["content"] = comment_content
+            interact_done = t_result["interact"].get("success", False)
+            logger.info(
+                f"[福袋-互动-评论] 结果: {t_result['interact']['message']}"
+            )
+
+        # 4b. 评论失败或禁用时，尝试转发
+        if not interact_done and repost_enabled and target_posts:
+            logger.info(
+                f"[福袋-互动] 「{topic_name}」转发帖子..."
+            )
+            first_post = target_posts[0]
+            post_id = first_post.get("id", "")
+            post_mid = first_post.get("mid", "")
+            repost_content = random.choice(FUDAI_REPOST_TEMPLATES)
+
+            t_result["interact"] = client.repost_weibo(
+                post_id=post_id,
+                post_mid=post_mid,
+                content=repost_content,
+            )
+            t_result["interact"]["method"] = "repost"
+            t_result["interact"]["content"] = repost_content
+            logger.info(
+                f"[福袋-互动-转发] 结果: {t_result['interact']['message']}"
+            )
+        elif not comment_enabled and not repost_enabled:
+            t_result["interact"] = {
+                "success": False,
+                "message": "互动福袋已禁用（评论和转发均关闭）",
+                "method": "none",
+                "content": "",
+            }
+            logger.info("[福袋-互动] 已禁用")
+
+        topic_results.append(t_result)
+
+        # 超话之间较长间隔
+        if t_idx < len(topics) - 1:
+            time.sleep(5)
+
+    # ---- 汇总 ----
+    logger.info("=" * 50)
+    logger.info("🎁 福袋任务汇总")
+    logger.info("=" * 50)
+
+    summary = {
+        "total": len(topics),
+        "checkin_success": 0,
+        "consume_success": 0,
+        "post_success": 0,
+        "interact_success": 0,
+    }
+
+    for tr in topic_results:
+        topic = tr["topic"]
+        if tr["error"]:
+            logger.info(f"❌ {topic}: {tr['error']}")
+            continue
+
+        ck = tr.get("checkin")
+        cs = tr.get("consume")
+        pt = tr.get("post")
+        ia = tr.get("interact")
+
+        ck_ok = ck and ck.get("success")
+        cs_ok = cs and cs.get("success")
+        pt_ok = pt and pt.get("success")
+        ia_ok = ia and ia.get("success")
+
+        if ck_ok:
+            summary["checkin_success"] += 1
+        if cs_ok:
+            summary["consume_success"] += 1
+        if pt_ok:
+            summary["post_success"] += 1
+        if ia_ok:
+            summary["interact_success"] += 1
+
+        logger.info(
+            f"{topic}: "
+            f"签到{'✅' if ck_ok else '❌'} "
+            f"消费{'✅' if cs_ok else '❌'} "
+            f"发帖{'✅' if pt_ok else '❌'} "
+            f"互动{'✅' if ia_ok else '❌'}"
+        )
+
+    logger.info(
+        f"🎫 签到福袋: {summary['checkin_success']}/{summary['total']}"
+    )
+    logger.info(
+        f"📖 消费福袋: {summary['consume_success']}/{summary['total']}"
+    )
+    logger.info(
+        f"📝 发帖福袋: {summary['post_success']}/{summary['total']}"
+    )
+    logger.info(
+        f"💬 互动福袋: {summary['interact_success']}/{summary['total']}"
+    )
+    logger.info("=" * 50)
+
+    return {"topics": topic_results, "summary": summary}
+
+
+# ============================================================
 # 主函数
 # ============================================================
 
@@ -543,9 +864,17 @@ def main():
     """主入口"""
     setup_logging()
 
-    logger.info("=" * 50)
-    logger.info("微博超话签到 + AI 发帖 启动")
-    logger.info("=" * 50)
+    # 检查是否为福袋模式
+    is_fudai_mode = "--fudai" in sys.argv
+
+    if is_fudai_mode:
+        logger.info("=" * 50)
+        logger.info("🎁 微博周三福袋任务 启动")
+        logger.info("=" * 50)
+    else:
+        logger.info("=" * 50)
+        logger.info("微博超话签到 + AI 发帖 启动")
+        logger.info("=" * 50)
 
     # ---- 1. 加载配置 ----
     cookie = os.environ.get("WEIBO_COOKIE", "")
@@ -569,6 +898,102 @@ def main():
             "Cookie 已失效，请重新获取微博 Cookie 并更新"
         )
         sys.exit(1)
+
+    # ---- 福袋模式：执行福袋任务后直接返回 ----
+    if is_fudai_mode:
+        fudai_config = config.get("fudai", {})
+        if not fudai_config.get("enabled", True):
+            logger.info("[福袋] 福袋功能已禁用，退出")
+            client.cleanup()
+            return
+
+        fudai_topics = fudai_config.get("topics", [])
+        if not fudai_topics:
+            # 未配置福袋话题时，复用签到话题
+            fudai_topics = [
+                t.get("name", "") for t in config.get("checkin", {}).get("topics", [])
+                if t.get("name")
+            ]
+            if fudai_topics:
+                logger.info(
+                    f"[福袋] 未配置独立福袋话题，复用签到话题: "
+                    f"{', '.join(fudai_topics)}"
+                )
+            else:
+                logger.warning("[福袋] 没有可用的福袋话题，退出")
+                client.cleanup()
+                return
+
+        # 解析 containerid 映射
+        topic_to_cid = {}
+        for topic_name in fudai_topics:
+            for ct in config.get("checkin", {}).get("topics", []):
+                if ct.get("name") == topic_name and ct.get("containerid"):
+                    topic_to_cid[topic_name] = ct["containerid"]
+                    break
+
+        # 如果签到配置中没有，尝试 API 搜索
+        for topic_name in fudai_topics:
+            if topic_name in topic_to_cid:
+                continue
+            cid = client.get_containerid_by_name(topic_name)
+            if cid:
+                topic_to_cid[topic_name] = cid
+                _save_containerid_to_config(topic_name, cid)
+            time.sleep(1)
+
+        # 初始化 AI Provider
+        ai = None
+        try:
+            ai = create_provider_from_env()
+        except ValueError as e:
+            logger.warning(f"[福袋] AI Provider 初始化失败: {e}")
+        except Exception as e:
+            logger.error(f"[福袋] AI Provider 异常: {e}")
+
+        # 执行福袋任务
+        fudai_results = run_fudai(client, ai, fudai_config, topic_to_cid)
+
+        # 清理
+        client.cleanup()
+
+        # 发送通知
+        notification_config = config.get("notification", {})
+        notify_enabled = notification_config.get("enabled", True)
+        if notify_enabled:
+            logger.info("=" * 50)
+            logger.info("发送福袋通知")
+            logger.info("=" * 50)
+            try:
+                notifier = create_notifier_from_env()
+                if notifier:
+                    title, content = build_notification(
+                        checkin_results=[],
+                        post_results=[],
+                        comment_results=[],
+                        fudai_results=fudai_results,
+                    )
+                    if notifier.send(title, content):
+                        logger.info("福袋通知已发送")
+                    else:
+                        logger.warning("福袋通知发送失败")
+                else:
+                    logger.info("未配置通知渠道，跳过")
+            except Exception as e:
+                logger.error(f"福袋通知异常: {e}")
+
+        # 福袋模式退出
+        summary = fudai_results.get("summary", {})
+        all_ok = (
+            summary.get("checkin_success", 0) == summary.get("total", 0)
+            and summary.get("consume_success", 0) == summary.get("total", 0)
+            and summary.get("post_success", 0) == summary.get("total", 0)
+            and summary.get("interact_success", 0) == summary.get("total", 0)
+        )
+        if not all_ok:
+            logger.warning("部分福袋任务未完成，返回非零退出码")
+            sys.exit(1)
+        return
 
     # ---- 3. 超话签到 ----
     checkin_topics = config.get("checkin", {}).get("topics", [])

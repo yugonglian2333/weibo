@@ -1600,3 +1600,167 @@ class WeiboClient:
             page.close()
 
         return result
+
+    # ============================================================
+    # 转发微博
+    # ============================================================
+
+    def repost_weibo(
+        self, post_id: str, post_mid: str, content: str = "转发微博"
+    ) -> dict:
+        """
+        转发一条微博
+
+        Args:
+            post_id: 微博 id
+            post_mid: 微博 mid
+            content: 转发语（默认"转发微博"，上限140字）
+
+        Returns:
+            {"success": bool, "message": str}
+        """
+        result = {"success": False, "message": ""}
+
+        # 字数截断
+        if len(content) > 140:
+            content = content[:137] + "..."
+
+        # 检测 Cookie 类型
+        cookie_dict = self._parse_cookie_string(self.cookie)
+        has_pc_cookie = bool(
+            cookie_dict.get("PC_TOKEN") or cookie_dict.get("_s_tentry")
+        )
+
+        if has_pc_cookie:
+            logger.info("检测到 PC 端 Cookie，使用 Playwright 转发...")
+            return self._repost_with_playwright(post_id, post_mid, content)
+
+        # ---- 移动端转发 ----
+        return self._repost_mobile_api(post_id, post_mid, content)
+
+    def _repost_mobile_api(
+        self, post_id: str, post_mid: str, content: str
+    ) -> dict:
+        """移动端转发：POST m.weibo.cn/api/statuses/repost"""
+        result = {"success": False, "message": ""}
+
+        st = self._get_fresh_st()
+        if not st:
+            result["message"] = "缺少 CSRF token，无法转发"
+            logger.warning(result["message"])
+            return result
+
+        url = f"{self.API_BASE}/api/statuses/repost"
+        headers = {
+            "X-XSRF-TOKEN": st,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": (
+                f"https://m.weibo.cn/detail/{post_id}"
+                if post_id
+                else "https://m.weibo.cn/"
+            ),
+        }
+        data_payload = {
+            "id": post_id,
+            "mid": post_mid,
+            "content": content,
+            "st": st,
+        }
+
+        resp_data = self._request(
+            "POST", url, headers=headers, data=data_payload
+        )
+
+        if resp_data is None:
+            result["message"] = f"❌ 转发请求失败（网络错误）id={post_id}"
+            logger.warning(result["message"])
+            return result
+
+        if resp_data.get("ok") == 1:
+            result["success"] = True
+            result["message"] = f"✅ 转发成功: {content[:30]}..."
+        else:
+            errmsg = resp_data.get("msg", "未知错误")
+            errno = resp_data.get("errno", "")
+            result["message"] = (
+                f"❌ 转发失败: {errmsg} (errno={errno})"
+            )
+
+        logger.info(result["message"])
+        return result
+
+    def _repost_with_playwright(
+        self, post_id: str, post_mid: str, content: str
+    ) -> dict:
+        """
+        使用 Playwright 浏览器在 PC 端转发
+        POST https://weibo.com/aj/v6/mblog/forward
+        """
+        result = {"success": False, "message": ""}
+
+        context = self._get_pw_context()
+        if context is None:
+            result["message"] = "Playwright 未安装，无法使用 PC 端转发"
+            logger.warning(result["message"])
+            return result
+
+        cookie_dict = self._parse_cookie_string(self.cookie)
+        st = cookie_dict.get("XSRF-TOKEN", "")
+
+        page = context.new_page()
+
+        try:
+            forward_url = "https://weibo.com/aj/v6/mblog/forward"
+            api_resp = page.request.post(
+                forward_url,
+                headers={
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Accept": "application/json, text/javascript, */*; q=0.01",
+                    "Content-Type": (
+                        "application/x-www-form-urlencoded; charset=UTF-8"
+                    ),
+                    "Referer": f"https://weibo.com/{post_id}",
+                },
+                form={
+                    "id": post_mid,
+                    "mid": post_mid,
+                    "reason": content,
+                    "st": st,
+                    "_t": "0",
+                },
+            )
+
+            body = api_resp.text()
+            logger.info(
+                f"PC端转发响应: status={api_resp.status}, "
+                f"body[:200]={body[:200]}"
+            )
+
+            try:
+                import json
+                data = json.loads(body)
+            except Exception:
+                result["message"] = "转发响应解析失败"
+                logger.warning(result["message"])
+                return result
+
+            code = str(data.get("code", ""))
+            if code == "100000":
+                result["success"] = True
+                result["message"] = f"✅ 转发成功（PC端）: {content[:30]}..."
+            else:
+                msg = data.get("msg", "")
+                result["message"] = (
+                    f"❌ 转发失败（PC端）: {msg}"
+                    f"{' (code=' + str(code) + ')' if code else ''}"
+                )
+
+            logger.info(result["message"])
+
+        except Exception as e:
+            logger.error(f"PC端转发异常: {e}")
+            result["message"] = f"❌ PC端转发异常: {e}"
+        finally:
+            page.close()
+
+        return result

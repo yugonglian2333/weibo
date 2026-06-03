@@ -685,6 +685,9 @@ select {
     <button class="tab-btn" onclick="switchTab('advanced')">
       <span class="tab-icon">🔧</span> 高级
     </button>
+    <button class="tab-btn" onclick="switchTab('fudai')">
+      <span class="tab-icon">🎁</span> 福袋
+    </button>
     <button class="tab-btn" onclick="switchTab('export')">
       <span class="tab-icon">📋</span> 导出
     </button>
@@ -836,7 +839,151 @@ select {
   </div>
 
   <!-- ============================================================
-       Tab 3: AI 服务商
+       Tab 3: 福袋任务
+       ============================================================ -->
+  <div id="tab-fudai" class="tab-content" style="display:none;">
+
+    <!-- 福袋总开关 -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">🎁 周三福袋任务</div>
+          <div class="card-desc">每周三自动执行福袋任务。4 种福袋类型：签到、消费（浏览）、发帖、互动（评论/转发）</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="fudai-enabled" onchange="saveAll()">
+          <span class="switch-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- 福袋话题列表 -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">📋 福袋话题列表</div>
+          <div class="card-desc">配置需要执行福袋任务的超话。留空则复用签到列表。</div>
+        </div>
+        <span id="fudai-count" class="badge badge-info">0 个话题</span>
+      </div>
+
+      <div id="fudai-list"></div>
+
+      <button class="list-add-btn" onclick="addFudaiTopic()">
+        ＋ 添加话题
+      </button>
+
+      <div class="form-hint" style="margin-top:12px;">
+        💡 <strong>提示：</strong>话题名称需与签到列表中的超话名称一致，以便自动获取 containerid。
+      </div>
+    </div>
+
+    <!-- 子任务开关 -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">⚙️ 子任务开关</div>
+          <div class="card-desc">独立控制每种福袋类型是否参与</div>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">
+            <input type="checkbox" id="fudai-checkin-enabled" onchange="saveAll()"> 🎫 签到福袋
+          </label>
+          <div class="form-hint">通过超话签到获取</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">
+            <input type="checkbox" id="fudai-post-enabled" onchange="saveAll()"> 📝 发帖福袋
+          </label>
+          <div class="form-hint">通过发帖获取（需 AI 服务商可用）</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">
+            <input type="checkbox" id="fudai-comment-enabled" onchange="saveAll()"> 💬 互动福袋（评论）
+          </label>
+          <div class="form-hint">通过评论帖子获取（优先方式）</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">
+            <input type="checkbox" id="fudai-repost-enabled" onchange="saveAll()"> 🔄 互动福袋（转发）
+          </label>
+          <div class="form-hint">通过转发帖子获取（评论失败时的备选）</div>
+        </div>
+      </div>
+
+      <div class="form-hint" style="margin-top:12px;">
+        📖 <strong>消费福袋</strong>（通过浏览超话内容获取）无需额外开关，浏览操作在任务中自动执行。
+      </div>
+    </div>
+
+    <!-- 发帖设置 -->
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">📝 福袋发帖风格</div>
+          <div class="card-desc">福袋任务中 AI 发帖的内容风格（独立于日常发帖配置）</div>
+        </div>
+      </div>
+
+      <div class="form-grid-2col">
+        <div class="form-group">
+          <label class="form-label" for="fudai-post-style">写作风格</label>
+          <select id="fudai-post-style" onchange="saveAll()">
+            <option value="自然随性">自然随性 — 生活化表达</option>
+            <option value="专业客观">专业客观 — 事实陈述</option>
+            <option value="幽默风趣">幽默风趣 — 轻松调侃</option>
+            <option value="热情洋溢">热情洋溢 — 情绪饱满</option>
+            <option value="简短有力">简短有力 — 精炼直接</option>
+            <option value="文艺清新">文艺清新 — 文学性强</option>
+            <option value="理性分析">理性分析 — 逻辑严密</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="fudai-post-min-words">最少字数</label>
+            <input type="number" id="fudai-post-min-words" min="10" max="1000" value="50" onchange="saveAll()">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="fudai-post-max-words">最多字数</label>
+            <input type="number" id="fudai-post-max-words" min="20" max="2000" value="200" onchange="saveAll()">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 福袋执行 -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🧪 手动执行福袋任务</div>
+      </div>
+      <div class="op-card">
+        <div class="op-desc">立即对所有配置的福袋话题执行完整的福袋任务流程（需连接服务器）</div>
+        <div class="op-row">
+          <button class="btn btn-primary btn-sm" onclick="runFudai()">▶ 执行福袋任务</button>
+          <span id="fudai-spinner" style="display:none;"><span class="spinner"></span></span>
+        </div>
+      </div>
+      <div id="fudai-result" class="result-card"></div>
+    </div>
+
+    <!-- 周三调度说明 -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">⏰ 周三调度</div>
+      </div>
+      <div class="form-hint" style="padding:16px;">
+        💡 福袋任务通过独立的 GitHub Actions workflow (<code>wednesday_fudai.yml</code>) 每周三北京时间 8:00 自动执行。<br>
+        可前往 GitHub Actions 页面手动触发，或通过上方按钮在本地立即执行。
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============================================================
+       Tab 4: AI 服务商
        ============================================================ -->
   <div id="tab-ai" class="tab-content" style="display:none;">
 
@@ -1216,6 +1363,17 @@ const DEFAULTS = {
   intervalPost: 3,
   cronMinute: "0",
   cronHour: "0",
+
+  // 福袋
+  fudaiEnabled: true,
+  fudaiTopics: ["鞠婧祎超话", "张婧仪超话"],
+  fudaiCheckinEnabled: true,
+  fudaiPostEnabled: true,
+  fudaiCommentEnabled: true,
+  fudaiRepostEnabled: false,
+  fudaiPostStyle: "自然随性",
+  fudaiPostMinWords: 50,
+  fudaiPostMaxWords: 200,
 };
 
 // 当前数据
@@ -1287,6 +1445,17 @@ function collectFormData() {
   config.intervalPost = parseInt(document.getElementById('interval-post').value) || 3;
   config.cronMinute = document.getElementById('cron-minute').value.trim() || '0';
   config.cronHour = document.getElementById('cron-hour').value.trim() || '0';
+
+  // 福袋
+  config.fudaiEnabled = document.getElementById('fudai-enabled').checked;
+  config.fudaiTopics = collectFudaiTopics();
+  config.fudaiCheckinEnabled = document.getElementById('fudai-checkin-enabled').checked;
+  config.fudaiPostEnabled = document.getElementById('fudai-post-enabled').checked;
+  config.fudaiCommentEnabled = document.getElementById('fudai-comment-enabled').checked;
+  config.fudaiRepostEnabled = document.getElementById('fudai-repost-enabled').checked;
+  config.fudaiPostStyle = document.getElementById('fudai-post-style').value;
+  config.fudaiPostMinWords = parseInt(document.getElementById('fudai-post-min-words').value) || 50;
+  config.fudaiPostMaxWords = parseInt(document.getElementById('fudai-post-max-words').value) || 200;
 }
 
 /* ============================================================
@@ -1323,6 +1492,17 @@ function initForm() {
   document.getElementById('interval-post').value = config.intervalPost;
   document.getElementById('cron-minute').value = config.cronMinute;
   document.getElementById('cron-hour').value = config.cronHour;
+
+  // 福袋
+  document.getElementById('fudai-enabled').checked = config.fudaiEnabled;
+  renderFudaiTopics();
+  document.getElementById('fudai-checkin-enabled').checked = config.fudaiCheckinEnabled;
+  document.getElementById('fudai-post-enabled').checked = config.fudaiPostEnabled;
+  document.getElementById('fudai-comment-enabled').checked = config.fudaiCommentEnabled;
+  document.getElementById('fudai-repost-enabled').checked = config.fudaiRepostEnabled;
+  document.getElementById('fudai-post-style').value = config.fudaiPostStyle;
+  document.getElementById('fudai-post-min-words').value = config.fudaiPostMinWords;
+  document.getElementById('fudai-post-max-words').value = config.fudaiPostMaxWords;
 
   // 初始化条件显示
   onAIProviderChange();
@@ -1454,6 +1634,68 @@ function updatePostTopicCount() {
 }
 
 /* ============================================================
+   动态列表：福袋话题
+   ============================================================ */
+function collectFudaiTopics() {
+  const items = document.querySelectorAll('#fudai-list .list-item');
+  const topics = [];
+  items.forEach(item => {
+    const name = item.querySelector('.topic-name').value.trim();
+    if (name) topics.push(name);
+  });
+  return topics;
+}
+
+function renderFudaiTopics() {
+  const list = document.getElementById('fudai-list');
+  if (!list) return;
+  const topics = config.fudaiTopics || [];
+  if (topics.length === 0) {
+    list.innerHTML = '<div class="form-hint" style="padding:12px;">暂无福袋话题。可手动添加或留空复用签到列表。</div>';
+  } else {
+    list.innerHTML = topics.map((t, i) => `
+      <div class="list-item">
+        <input type="text" class="topic-name" value="${escapeHtml(t)}" placeholder="超话名称（需与签到列表一致）" onchange="saveAll()">
+        <div class="list-actions">
+          ${i > 0 ? `<button class="btn btn-sm btn-icon" onclick="moveFudaiTopic(${i}, -1)" title="上移">↑</button>` : `<span style="width:28px;"></span>`}
+          ${i < topics.length - 1 ? `<button class="btn btn-sm btn-icon" onclick="moveFudaiTopic(${i}, 1)" title="下移">↓</button>` : `<span style="width:28px;"></span>`}
+          <button class="btn btn-sm btn-icon" onclick="removeFudaiTopic(${i})" title="删除">✕</button>
+        </div>
+      </div>
+    `).join('');
+  }
+  updateFudaiTopicCount();
+}
+
+function addFudaiTopic() {
+  if (!config.fudaiTopics) config.fudaiTopics = [];
+  config.fudaiTopics.push('');
+  renderFudaiTopics();
+  saveAll();
+}
+
+function removeFudaiTopic(index) {
+  config.fudaiTopics.splice(index, 1);
+  renderFudaiTopics();
+  saveAll();
+}
+
+function moveFudaiTopic(index, direction) {
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= config.fudaiTopics.length) return;
+  const tmp = config.fudaiTopics[index];
+  config.fudaiTopics[index] = config.fudaiTopics[newIndex];
+  config.fudaiTopics[newIndex] = tmp;
+  renderFudaiTopics();
+  saveAll();
+}
+
+function updateFudaiTopicCount() {
+  const el = document.getElementById('fudai-count');
+  if (el) el.textContent = `${(config.fudaiTopics || []).length} 个话题`;
+}
+
+/* ============================================================
    Tab 切换
    ============================================================ */
 function switchTab(tabName) {
@@ -1570,6 +1812,29 @@ function generateConfigYaml() {
   yaml += 'notification:\n';
   yaml += `  enabled: ${config.notifyEnabled ? 'true' : 'false'}\n`;
   yaml += `  provider: ${config.notifyProvider}\n`;
+  yaml += '\n';
+
+  // 福袋
+  yaml += '# ---- 周三福袋任务 ----\n';
+  yaml += '# 4 种福袋类型：签到、消费（浏览）、发帖、互动（评论/转发）\n';
+  yaml += 'fudai:\n';
+  yaml += `  enabled: ${config.fudaiEnabled ? 'true' : 'false'}\n`;
+  yaml += '  topics:\n';
+  const fudaiTopics = config.fudaiTopics || [];
+  if (fudaiTopics.length === 0) {
+    yaml += '    # - "话题名称"\n';
+  } else {
+    for (const t of fudaiTopics) {
+      yaml += `    - "${t}"\n`;
+    }
+  }
+  yaml += `  checkin_enabled: ${config.fudaiCheckinEnabled ? 'true' : 'false'}\n`;
+  yaml += `  post_enabled: ${config.fudaiPostEnabled ? 'true' : 'false'}\n`;
+  yaml += `  comment_enabled: ${config.fudaiCommentEnabled ? 'true' : 'false'}\n`;
+  yaml += `  repost_enabled: ${config.fudaiRepostEnabled ? 'true' : 'false'}\n`;
+  yaml += `  post_style: "${config.fudaiPostStyle}"\n`;
+  yaml += `  post_min_words: ${config.fudaiPostMinWords}\n`;
+  yaml += `  post_max_words: ${config.fudaiPostMaxWords}\n`;
 
   return yaml;
 }
@@ -2085,6 +2350,18 @@ function applyServerConfig(data) {
     if (n.enabled !== undefined) config.notifyEnabled = n.enabled;
     if (n.provider) config.notifyProvider = n.provider;
   }
+  if (data.fudai) {
+    const f = data.fudai;
+    if (f.enabled !== undefined) config.fudaiEnabled = f.enabled;
+    if (f.topics) config.fudaiTopics = f.topics;
+    if (f.checkin_enabled !== undefined) config.fudaiCheckinEnabled = f.checkin_enabled;
+    if (f.post_enabled !== undefined) config.fudaiPostEnabled = f.post_enabled;
+    if (f.comment_enabled !== undefined) config.fudaiCommentEnabled = f.comment_enabled;
+    if (f.repost_enabled !== undefined) config.fudaiRepostEnabled = f.repost_enabled;
+    if (f.post_style) config.fudaiPostStyle = f.post_style;
+    if (f.post_min_words !== undefined) config.fudaiPostMinWords = f.post_min_words;
+    if (f.post_max_words !== undefined) config.fudaiPostMaxWords = f.post_max_words;
+  }
 }
 
 function applyServerEnv(data) {
@@ -2124,6 +2401,17 @@ async function saveToServer() {
     notification: {
       enabled: config.notifyEnabled,
       provider: config.notifyProvider,
+    },
+    fudai: {
+      enabled: config.fudaiEnabled,
+      topics: config.fudaiTopics || [],
+      checkin_enabled: config.fudaiCheckinEnabled,
+      post_enabled: config.fudaiPostEnabled,
+      comment_enabled: config.fudaiCommentEnabled,
+      repost_enabled: config.fudaiRepostEnabled,
+      post_style: config.fudaiPostStyle,
+      post_min_words: config.fudaiPostMinWords,
+      post_max_words: config.fudaiPostMaxWords,
     },
   };
 
@@ -2367,6 +2655,20 @@ async function runAll() {
     showResult('runall-result', 'info', '⏳ 已在后台启动，请切换到"日志"标签页查看进度');
     showToast('正在后台执行...', 'success');
     // 切换到日志 tab
+    setTimeout(() => { switchTab('logs'); refreshLogs(); }, 500);
+  }
+}
+
+async function runFudai() {
+  if (!confirm('确定要执行周三福袋任务吗？\n(签到 + 浏览 + 发帖 + 互动)')) return;
+
+  toggleSpinner('fudai-spinner', true);
+  const res = await apiPost('/api/fudai/run');
+  toggleSpinner('fudai-spinner', false);
+
+  if (res) {
+    showResult('fudai-result', 'info', '⏳ 福袋任务已在后台启动，请切换到"日志"标签页查看进度');
+    showToast('福袋任务正在后台执行...', 'success');
     setTimeout(() => { switchTab('logs'); refreshLogs(); }, 500);
   }
 }
